@@ -1,18 +1,16 @@
 class User:
-    def __init__(self, id: int, name='', age=0, sex=''):
-        self.id = id
-        self.name = name
-        self.age = age
-        self.sex = sex
+    def __init__(self, Aword='' , Rword=''):
+        self.Aword = Aword
+        self.Rword = Rword
 
     def __str__(self):
-        return (f'Name: {self.name}\n'
-                f'Age: {str(self.age)}\n'
-                f'Sex: {self.sex}')
+        return (f'Aword: {self.Aword}\n'
+                f'Rword: {str(self.Rword)}\n'
+                )
 
     def save(self):
-        record = f'{self.id},{self.name},{self.age},{self.sex}\n'
-        file = open("users.csv", "a")
+        record = f'{self.Aword},{self.Rword}\n'
+        file = open("users.csv", "a",encoding="UTF-8")
         file.write(record)
         file.close()
 
@@ -24,6 +22,6 @@ class User:
         lines = lines[1:]
         for line in lines:
             data = line.split(',')
-            user = User(int(data[0]), data[1], int(data[2]), data[3])
-            users[int(data[0])] = user
+            user = User(str(data[0]))
+            users[str(data[0])] = user
         return users

@@ -12,9 +12,8 @@ from user import User
 
 
 class Reg(StatesGroup):    #класс нужен для состояния
-    name = State()
-    Age = State()
-    Sex = State()
+    Aword = State()
+    Rword = State()
 
 
 import config
@@ -34,27 +33,6 @@ async def main_menu_button_handler(msg: Message):
     await msg.answer("Выбери кого то из нас👇:",
                      reply_markup=kb.main)
 
-@router.message(Command ("id"))
-async def id_handler(msg: Message):
-    await msg.answer(f"Ваш <b>Username</b>: {msg.from_user.username}\n"
-                      f"Ваш Id: {msg.from_user.id}", parse_mode="HTML")
-
-
-@router.message(Command("photo_id"))
-async def photo_id_handler(msg: Message):
-    await msg.answer("Отправь картинку и получи id")
-
-
-
-
-@router.message(F.photo)
-async def id_photo(msg: Message):
-    await msg.reply(f"ID фотоc: {msg.photo[-1].file_id}")
-
-
-@router.message(Command("my_logo"))
-async def my_logo_handler(msg: Message):
-    await msg.answer_photo(photo="AgACAgIAAxkBAAM1Zuwh_WXGTvXVHB1S7TOxhonWdf8AAs7eMRvSDGFLRZRnRZH6hO4BAAMCAAN4AAM2BA")
 
 
 @router.callback_query(F.data == "My profile")
@@ -64,58 +42,46 @@ async def my_profile(callback: CallbackQuery):
 
 
 
-
-@router.callback_query(F.data == "My subjects")
-async def my_profile(callback: CallbackQuery):
-    await callback.answer("") #короткое уведомление + show_alert=True делает всплывающее окно
-    await callback.message.edit_text("Вот что я сдаю на огэ:", reply_markup=await kb.inline_subject()) #пример колбэковского хэндлера+ инлайн ответ ,(edit_text для ответа), await перед путем ответа т.к функция асинхронная
-
-
-
-@router.callback_query(F.data == "My commands")
-async def my_commands(callback: CallbackQuery):
-    await callback.answer("") #короткое уведомление + show_alert=True делает всплывающее окно
-    await callback.message.edit_text("Вот какие команды я сделал:", reply_markup=await kb.inline_commands())
-
-
-
-
 @router.message(Command("start"))
 async def step_one(message: Message, state: FSMContext):
-    await state.set_state(Reg.name)    # Устанавливаем состояние регистрации.имя
+    await state.set_state(Reg.Aword)
     users[f'{message.from_user.id}'] = User(message.from_user.id)
-    await message.answer("👋Привет, для начала нужно зарегистрироваться\n\nВведите Ваше имя:")
+    await message.answer("👋Привет, введи англ слово: \n")
 
-@router.message(Reg.name)
+
+@router.message(Reg.Aword)
 async def step_two(message: Message, state: FSMContext):   # Словиле имя
-    users[f'{message.from_user.id}'].name = message.text
-    await state.set_state(Reg.Age)  #Изменили стоятояние на возраст
-    await message.answer("Введите Ваш возраст:")
-
-
-@router.message(Reg.Age)
-async def step_three(message: Message, state: FSMContext):
-    users[f'{message.from_user.id}'].age = int(message.text)
-
-    await state.set_state(Reg.Sex)
-    await message.answer("Введите Ваш пол:")
+    users[f'{message.from_user.id}'].Aword = message.text
+    await state.set_state(Reg.Rword)
+    await message.answer("Введите перевод:")
 
 
 
 
-@router.message(Reg.Sex)
+@router.message(Reg.Rword)
 async def step_four(message: Message, state: FSMContext):
-    users[f'{message.from_user.id}'].sex = message.text
+    users[f'{message.from_user.id}'].Rword = message.text
     user = users[f'{message.from_user.id}']
     user.save()
-    await message.answer(f"Спасибо, регистрация завершена😀.Для продолжения нажмите Главное меню👇\n\n{user}", reply_markup=kb.main_menu_button(message.from_user.id))
-    await state.clear()
+    await message.answer(f"Ты записал слова😀.Для продолжения нажмите Главное меню👇\n\n{user}", reply_markup=kb.main_menu_button(message.from_user.id))
+    await state.set_state(Reg.Aword)
+    await message.answer("Введите англ слово")
+
+
+
+
 
 
 @router.message(Command("allusers"))
 async def show_users(msg: Message):
     for user in User.get_all_users().values():
         await msg.answer(str(user))
+
+
+
+
+
+
 
 
 
