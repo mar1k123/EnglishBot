@@ -1,25 +1,24 @@
 import csv
 
-def csv_to_list(file_path):
-    data_list = []
+def csv_to_dict(file_path):
+    # Инициализируем пустой словарь для хранения данных
+    data_dict = {}
 
+    # Открываем CSV файл для чтения
     with open(file_path, mode='r', encoding='utf-8') as file:
-        # Создаем объект reader для чтения данных из CSV
-        csv_reader = csv.reader(file)
+        csv_reader = csv.DictReader(file)
 
-        # Пропускаем заголовки, если они есть
-        next(csv_reader, None)
-
-        # Читаем данные из CSV и добавляем их в список
+        # Читаем данные из CSV и добавляем их в словарь
         for row in csv_reader:
-            data_list.append(row)
+            # Используем значение первого столбца как ключ
+            key = row[next(iter(row))]
+            data_dict[key] = row
 
-    return data_list
-
+    return data_dict
 
 # Укажите путь к вашему CSV файлу
-file_path = 'C:\Users\user\PycharmProjects\EnglishBot/users.csv.'
-data = csv_to_list(file_path)
+file_path = str(r'C:\Users\user\PycharmProjects\EnglishBot\users.csv')
+data = csv_to_dict(file_path)
 
 # Печатаем полученный список
 print(data)
