@@ -1,10 +1,12 @@
+import random
+
 from aiogram import Router, Bot, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from pyexpat.errors import messages
 from aiogram.fsm.state import StatesGroup, State, default_state
-from aiogram.fsm.context import FSMContext    # нужен для управления состояниями
-
+from aiogram.fsm.context import FSMContext# нужен для управления состояниями
+import changer
 
 
 import keyboards as kb
@@ -24,13 +26,13 @@ users = {}
 
 @router.message(Command("hi"))
 async def start_handler(msg: Message):
-    await msg.answer("Привет, я бот тестировщик,\nвыбери кого то из нас👇:",
+    await msg.answer("Hi, I am your english bot,\nChoose one of us👇:",
                      reply_markup=kb.main) #kb.main было для ReplyKB, settings для Inline KB + awain... для моей асинхронной функции в KB
 
 
 @router.message(F.text == "📜 Главное меню")
 async def main_menu_button_handler(msg: Message):
-    await msg.answer("Выбери кого то из нас👇:",
+    await msg.answer("Choose one of us👇:",
                      reply_markup=kb.main)
 
 
@@ -38,7 +40,7 @@ async def main_menu_button_handler(msg: Message):
 @router.callback_query(F.data == "My profile")
 async def my_profile(callback: CallbackQuery):
     await callback.answer("") #короткое уведомление + show_alert=True делает всплывающее окно
-    await callback.message.edit_text("Вот мой профиль на Git Hub:", reply_markup=await kb.inline_profile())
+    await callback.message.edit_text("My profile on Git Hub:", reply_markup=await kb.inline_profile())
 
 
 
@@ -46,14 +48,14 @@ async def my_profile(callback: CallbackQuery):
 async def step_one(message: Message, state: FSMContext):
     await state.set_state(Reg.Aword)
     users[f'{message.from_user.id}'] = User(message.from_user.id)
-    await message.answer("👋Привет, введи англ слово: \n")
+    await message.answer("👋Hi, enter english word: \n")
 
 
 @router.message(Reg.Aword)
 async def step_two(message: Message, state: FSMContext):   # Словиле имя
     users[f'{message.from_user.id}'].Aword = message.text
     await state.set_state(Reg.Rword)
-    await message.answer("Введите перевод:")
+    await message.answer("Enter translate:")
 
 
 
@@ -63,9 +65,9 @@ async def step_four(message: Message, state: FSMContext):
     users[f'{message.from_user.id}'].Rword = message.text
     user = users[f'{message.from_user.id}']
     user.save()
-    await message.answer(f"Ты записал слова😀.Для продолжения нажмите Главное меню👇\n\n{user}", reply_markup=kb.main_menu_button(message.from_user.id))
+    await message.answer(f"Current:.Enter more\n\n{user}", reply_markup=kb.main_menu_button(message.from_user.id))
     await state.set_state(Reg.Aword)
-    await message.answer("Введите англ слово")
+    await message.answer("Enter english word")
 
 
 
@@ -79,6 +81,45 @@ async def show_users(msg: Message):
 
 
 
+@router.message(Command("TryMe"))
+async def random_ew(msg: Message):
+    a = random.choice(list((changer.data.keys())))
+    await msg.answer(a)
+    await msg.answer("Enter the answer")
+    if msg.text == changer.data[a]:
+        await msg.answer("Great Job")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -89,3 +130,13 @@ async def show_users(msg: Message):
 @router.message()
 async def noCommands_handler(msg: Message):
     await msg.reply("Такой команды нету")
+
+
+
+
+
+
+
+
+
+
