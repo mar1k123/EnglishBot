@@ -8,7 +8,7 @@ def csv_to_dict(file_path):
     with open(file_path, mode='r', encoding='utf-8') as file:
         csv_reader = csv.DictReader(file)
 
-        # Читаем данные из CSV и добавляем их в словарь
+        # Читаем данные из csv и добавляем их в словарь
         for row in csv_reader:
             # Используем значение первого столбца как ключ
             key = row[next(iter(row))]
