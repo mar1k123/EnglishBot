@@ -12,8 +12,11 @@ import changer
 import keyboards as kb
 from user import User
 
+running = False
 
-class Reg(StatesGroup):    #класс нужен для состояния
+
+
+class Reg(StatesGroup):  #класс нужен для состояния
     Aword = State()
     Rword = State()
 
@@ -24,10 +27,12 @@ bot = Bot(token=config.BOT_TOKEN)
 router = Router()
 users = {}
 
+
+
 @router.message(Command("hi"))
 async def start_handler(msg: Message):
     await msg.answer("Hi, I am your english bot,\nChoose one of us👇:",
-                     reply_markup=kb.main) #kb.main было для ReplyKB, settings для Inline KB + awain... для моей асинхронной функции в KB
+                     reply_markup=kb.main)  #kb.main было для ReplyKB, settings для Inline KB + awain... для моей асинхронной функции в KB
 
 
 @router.message(F.text == "📜 Главное меню")
@@ -39,8 +44,11 @@ async def main_menu_button_handler(msg: Message):
 
 @router.callback_query(F.data == "My profile")
 async def my_profile(callback: CallbackQuery):
-    await callback.answer("") #короткое уведомление + show_alert=True делает всплывающее окно
+    await callback.answer("")  #короткое уведомление + show_alert=True делает всплывающее окно
     await callback.message.edit_text("My profile on Git Hub:", reply_markup=await kb.inline_profile())
+
+
+
 
 
 
@@ -51,11 +59,13 @@ async def step_one(message: Message, state: FSMContext):
     await message.answer("👋Hi, enter english word: \n")
 
 
+
 @router.message(Reg.Aword)
-async def step_two(message: Message, state: FSMContext):   # Словиле имя
+async def step_two(message: Message, state: FSMContext):
     users[f'{message.from_user.id}'].Aword = message.text
     await state.set_state(Reg.Rword)
     await message.answer("Enter translate:")
+
 
 
 
@@ -64,13 +74,13 @@ async def step_two(message: Message, state: FSMContext):   # Словиле им
 async def step_four(message: Message, state: FSMContext):
     users[f'{message.from_user.id}'].Rword = message.text
     user = users[f'{message.from_user.id}']
-    user.save()
-    await message.answer(f"Current:.Enter more\n\n{user}", reply_markup=kb.main_menu_button(message.from_user.id))
-    await state.set_state(Reg.Aword)
-    await message.answer("Enter english word")
-
-
-
+    if message.text == "Стоп":
+        await state.clear()
+    else:
+        user.save()
+        await message.answer(f"Current:\nEnter more\n{user}", reply_markup=kb.main_menu_button(message.from_user.id))
+        await state.set_state(Reg.Aword)
+        await message.answer("Enter english word")
 
 
 
@@ -81,41 +91,16 @@ async def show_users(msg: Message):
 
 
 
-@router.message(Command("TryMe"))
-async def random_ew(msg: Message):
+@router.message(Command("tryMe"))
+async def random_ew(msg: Message, ):
     a = random.choice(list((changer.data.keys())))
     await msg.answer(a)
     await msg.answer("Enter the answer")
-    if msg.text == changer.data[a]:
+    if Message == changer.data[a]:
         await msg.answer("Great Job")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    else:
+        await msg.answer(a)
+        await msg.answer("Enter the answer")
 
 
 
@@ -130,6 +115,9 @@ async def random_ew(msg: Message):
 @router.message()
 async def noCommands_handler(msg: Message):
     await msg.reply("Такой команды нету")
+
+
+
 
 
 
