@@ -2,9 +2,19 @@ from aiogram.types import (ReplyKeyboardMarkup,KeyboardButton,
                            InlineKeyboardMarkup, InlineKeyboardButton) #тож самое что и Reply только Inline
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder # Заимпортил билдер (он нужен для того, чтобы не менять знаения через код)
 
-main = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="Мой профиль🌴", callback_data="My profile")],
-])
+main = ReplyKeyboardMarkup(keyboard=[
+    [KeyboardButton (text="/add")],
+    [KeyboardButton(text="/tryMe")]
+],                              resize_keyboard=True)
+
+
+
+
+
+
+
+
+
 
 
 My_Profile = ["Git Hub"]
@@ -22,3 +32,19 @@ def main_menu_button(user_telegram_id: int):
     button = KeyboardButton(text="📜 Главное меню")
     keyboard = ReplyKeyboardMarkup(keyboard=[[button]], resize_keyboard=True)
     return keyboard
+
+
+def add_button(user_telegram_id: int):
+    button = KeyboardButton(text="Add words")
+    keyboard = ReplyKeyboardMarkup(keyboard=[[button]])
+    return keyboard
+
+
+
+
+
+
+
+
+
+

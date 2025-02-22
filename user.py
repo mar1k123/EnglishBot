@@ -22,6 +22,6 @@ class User:
         lines = lines[1:]
         for line in lines:
             data = line.split(',')
-            user = User(str(data[0]))
+            user = User(str(data[0]), str(data[1]))
             users[str(data[0])] = user
         return users
