@@ -1,6 +1,8 @@
 import random
+from email.policy import default
 from symtable import Class
-
+# from aiogram.client.default import DefaultBotProperties, Default
+# from aiogram.enums import ParseMode
 from aiogram import Router, Bot, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
@@ -8,21 +10,27 @@ from pyexpat.errors import messages
 from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.fsm.context import FSMContext# нужен для управления состояниями
 import changer
+# from html import escape
 
 running_processes = True
 
 import keyboards as kb
 from user import User
+# Def = DefaultBotProperties(parse_mode=ParseMode.HTML)
 
-running = False
+running_processes = True
 
 class Words(StatesGroup):
     Original = State()
     Translate = State()
+    Cnt = "cnt"
+
 
 class Reg(StatesGroup):  #класс нужен для состояния
     Aword = State()
     Rword = State()
+
+user_attempts = {}
 
 
 import config
@@ -35,13 +43,16 @@ users = {}
 
 @router.message(Command("start"))
 async def start_handler(msg: Message):
-    await msg.answer("Hi, I am your english bot,\nChoose one of us👇:",
-                     reply_markup=kb.main)
+    await msg.answer("Привет, Я твой <i>English bot</i>, помогу тебе выучить английский быстрее✔"
+                     "\n\n<b>Доступные команды</b>:"
+                     "\n/add - добавить английское слово в список и его перевод"
+                     "\n/check - бот выведет слова на английском (2 попытки)👇", parse_mode="HTML")
+
 
 
 @router.message(F.text == "📜 Главное меню")
 async def main_menu_button_handler(msg: Message):
-    await msg.answer("Choose one of us👇:",
+    await msg.answer("Выбери одного из нас👇:",
                      reply_markup=kb.main)
 
 
@@ -52,7 +63,8 @@ async def main_menu_button_handler(msg: Message):
 async def step_one(message: Message, state: FSMContext):
     await state.set_state(Reg.Aword)
     users[f'{message.from_user.id}'] = User(message.from_user.id)
-    await message.answer("👋Hi, enter english word: \n")
+    await message.answer("Привет, введи английское слово:\n"
+                         "<i>Ты всегда можешь прекратить ввод слов, вписав в чат <b>'Cтоп'</b> или <b>'Stop'</b> 2 раза\n</i>", parse_mode="HTML")
 
 
 
@@ -60,7 +72,7 @@ async def step_one(message: Message, state: FSMContext):
 async def step_two(message: Message, state: FSMContext):
     users[f'{message.from_user.id}'].Aword = message.text
     await state.set_state(Reg.Rword)
-    await message.answer("Enter translate:")
+    await message.answer("Введите перевод:")
 
 
 
@@ -71,12 +83,13 @@ async def step_four(message: Message, state: FSMContext):
     users[f'{message.from_user.id}'].Rword = message.text
     user = users[f'{message.from_user.id}']
     if message.text in ["Стоп","Stop"]:
+        await message.answer("Вы приостановили ввод слов\nВыберите нужную вам команду👇")
         await state.clear()
     else:
         user.save()
-        await message.answer(f"Current:\nEnter more\n{user}")
+        await message.answer(f"<b>Текущее</b>:\n{user}Введите больше", parse_mode="HTML")
         await state.set_state(Reg.Aword)
-        await message.answer("Enter english word")
+        await message.answer("Введите англ. слово")
 
 
 
@@ -87,33 +100,40 @@ async def show_users(msg: Message):
 
 
 
-@router.message(Command("tryMe"))
+@router.message(Command("check"))
 async def random_ew(msg: Message, state: FSMContext):
     await state.set_state(Words.Original)
     a = random.choice(list((changer.data.keys())))
     await msg.answer(a)
-    await msg.answer("Enter the answer:")
+    await msg.answer("Введите ответ:")
     await state.update_data(words = a)
-
-
-
-
+    await state.update_data(words = a, cnt=0)
 
 @router.message(Words.Original)
 async def translate(msg: Message, state: FSMContext):
     a = (await state.get_data())["words"]
+    data = await state.get_data()
+    cnt = data["cnt"]
     if msg.text.lower() == changer.data[f"{a}"]["Rword"].lower():
-        await msg.reply("Great job")
+        await msg.reply("Отличная работа")
         a = random.choice(list((changer.data.keys())))
         await msg.answer(a)
-        await msg.answer("Enter the answer:")
-        await state.update_data(words=a)
+        await msg.answer("Введите ответ:")
+        await state.update_data(words= a, cnt = 0)
+    if msg.text in ["Стоп","Stop"]:
+        await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇",parse_mode="HTML")
+        await state.clear()
     else:
-        await msg.answer("Try again")
-
-
-
-
+        cnt += 1
+        if cnt >= 2:
+            await msg.answer(f"Правильный перевод: {changer.data[f"{a}"]["Rword"].lower()}")
+            a = random.choice(list((changer.data.keys())))
+            await msg.answer(a)
+            await msg.answer("Введите ответ:")
+            await state.update_data(words=a, cnt=0)  # cбрасываем cnt
+        else:
+            await msg.answer("Попробуй заново")
+            await state.update_data(cnt=cnt)  # обновляем cnt
 
 
 
@@ -124,8 +144,6 @@ async def translate(msg: Message, state: FSMContext):
 @router.message()
 async def noCommands_handler(msg: Message):
     await msg.reply("Такой команды нету")
-
-
 
 
 
