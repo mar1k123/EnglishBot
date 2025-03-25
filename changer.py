@@ -20,3 +20,4 @@ file_path = str(r'C:\Users\user\PycharmProjects\EnglishBot\users.csv')
 data = csv_to_dict(file_path)
 
 print(data)
+

@@ -3,14 +3,18 @@ from email.policy import default
 from symtable import Class
 # from aiogram.client.default import DefaultBotProperties, Default
 # from aiogram.enums import ParseMode
-from aiogram import Router, Bot, F
+from aiogram import Router, Bot, F, types
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, User, Chat, Update
 from pyexpat.errors import messages
 from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.fsm.context import FSMContext# нужен для управления состояниями
 import changer
 # from html import escape
+import asyncio
+from datetime import datetime
+from typing import Callable
+
 
 running_processes = True
 
@@ -25,10 +29,17 @@ class Words(StatesGroup):
     Translate = State()
     Cnt = "cnt"
 
+user_timers = {}
+
 
 class Reg(StatesGroup):  #класс нужен для состояния
     Aword = State()
     Rword = State()
+
+
+class TimerStates(StatesGroup):
+    waiting_interval = State()
+
 
 user_attempts = {}
 
@@ -99,41 +110,46 @@ async def show_users(msg: Message):
         await msg.answer(str(user))
 
 
-
 @router.message(Command("check"))
 async def random_ew(msg: Message, state: FSMContext):
     await state.set_state(Words.Original)
-    a = random.choice(list((changer.data.keys())))
+    a = random.choice(list(changer.data.keys()))
     await msg.answer(a)
     await msg.answer("Введите ответ:")
-    await state.update_data(words = a)
-    await state.update_data(words = a, cnt=0)
+    await state.update_data(words=a, cnt=0, waiting_for_answer=True)
+
 
 @router.message(Words.Original)
 async def translate(msg: Message, state: FSMContext):
-    a = (await state.get_data())["words"]
     data = await state.get_data()
+    a = data["words"]
     cnt = data["cnt"]
-    if msg.text.lower() == changer.data[f"{a}"]["Rword"].lower():
-        await msg.reply("Отличная работа")
-        a = random.choice(list((changer.data.keys())))
-        await msg.answer(a)
-        await msg.answer("Введите ответ:")
-        await state.update_data(words= a, cnt = 0)
-    if msg.text in ["Стоп","Stop"]:
-        await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇",parse_mode="HTML")
-        await state.clear()
-    else:
-        cnt += 1
-        if cnt >= 2:
-            await msg.answer(f"Правильный перевод: {changer.data[f"{a}"]["Rword"].lower()}")
-            a = random.choice(list((changer.data.keys())))
+    waiting_for_answer = data.get("waiting_for_answer", True)
+
+    if waiting_for_answer:
+        if msg.text.lower() == changer.data[a]["Rword"].lower():
+            await msg.reply("✅ Отличная работа!")
+            a = random.choice(list(changer.data.keys()))
             await msg.answer(a)
             await msg.answer("Введите ответ:")
-            await state.update_data(words=a, cnt=0)  # cбрасываем cnt
+            await state.update_data(words=a, cnt=0, waiting_for_answer=True)
+        elif msg.text.lower() in ["стоп", "stop"]:
+            await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇", parse_mode="HTML")
+            await state.clear()
         else:
-            await msg.answer("Попробуй заново")
-            await state.update_data(cnt=cnt)  # обновляем cnt
+            cnt += 1
+            if cnt >= 2:
+                await msg.answer(f"❌ Правильный перевод: {changer.data[a]['Rword']}")
+                a = random.choice(list(changer.data.keys()))
+                await msg.answer(a)
+                await msg.answer("Введите ответ:")
+                await state.update_data(words=a, cnt=0, waiting_for_answer=True)
+            else:
+                await msg.answer("🔄 Попробуй еще раз")
+                await state.update_data(cnt=cnt, waiting_for_answer=True)
+    else:
+        await state.update_data(waiting_for_answer=True)
+
 
 
 

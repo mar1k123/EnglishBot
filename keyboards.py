@@ -3,8 +3,8 @@ from aiogram.types import (ReplyKeyboardMarkup,KeyboardButton,
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder # Заимпортил билдер (он нужен для того, чтобы не менять знаения через код)
 
 main = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton (text="/add")],
-    [KeyboardButton(text="/tryMe")]
+    [KeyboardButton (text="add")],
+    [KeyboardButton(text="tryMe")]
 ],                              resize_keyboard=True)
 
 
