@@ -157,6 +157,59 @@ async def translate(msg: Message, state: FSMContext):
 
 
 
+
+
+@router.message(Command("check_reverse"))
+async def random_rw(msg: Message, state: FSMContext):
+    await state.set_state(Words.Translate)
+    a = random.choice(list(changer.data.keys()))
+    russian_word = changer.data[a]["Rword"]
+    await msg.answer(russian_word)
+    await msg.answer("Введите английский перевод:")
+    await state.update_data(words=a, cnt=0, waiting_for_answer=True)
+
+
+@router.message(Words.Translate)
+async def check_english(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    a = data["words"]
+    cnt = data["cnt"]
+    waiting_for_answer = data.get("waiting_for_answer", True)
+
+    if waiting_for_answer:
+        if msg.text.lower() == a.lower():
+            await msg.reply("✅ Отличная работа!")
+            a = random.choice(list(changer.data.keys()))
+            russian_word = changer.data[a]["Rword"]
+            await msg.answer(russian_word)
+            await msg.answer("Введите английский перевод:")
+            await state.update_data(words=a, cnt=0, waiting_for_answer=True)
+        elif msg.text.lower() in ["стоп", "stop"]:
+            await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇", parse_mode="HTML")
+            await state.clear()
+        else:
+            cnt += 1
+            if cnt >= 2:
+                await msg.answer(f"❌ Правильный перевод: {a}")
+                a = random.choice(list(changer.data.keys()))
+                russian_word = changer.data[a]["Rword"]
+                await msg.answer(russian_word)
+                await msg.answer("Введите английский перевод:")
+                await state.update_data(words=a, cnt=0, waiting_for_answer=True)
+            else:
+                await msg.answer("🔄 Попробуй еще раз")
+                await state.update_data(cnt=cnt, waiting_for_answer=True)
+    else:
+        await state.update_data(waiting_for_answer=True)
+
+
+
+
+
+
+
+
+
 @router.message()
 async def noCommands_handler(msg: Message):
     await msg.reply("Такой команды нету")
