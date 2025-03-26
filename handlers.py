@@ -14,6 +14,7 @@ import changer
 import asyncio
 from datetime import datetime
 from typing import Callable
+import time
 
 
 running_processes = True
@@ -139,9 +140,11 @@ async def translate(msg: Message, state: FSMContext):
         else:
             cnt += 1
             if cnt >= 2:
-                await msg.answer(f"❌ Правильный перевод: {changer.data[a]['Rword']}")
+                await msg.answer(f"❌ Правильный перевод: <b> {changer.data[a]['Rword']}</b>", parse_mode="HTML")
+                time.sleep(1)
                 a = random.choice(list(changer.data.keys()))
                 await msg.answer(a)
+                time.sleep(1)
                 await msg.answer("Введите ответ:")
                 await state.update_data(words=a, cnt=0, waiting_for_answer=True)
             else:
@@ -190,10 +193,12 @@ async def check_english(msg: Message, state: FSMContext):
         else:
             cnt += 1
             if cnt >= 2:
-                await msg.answer(f"❌ Правильный перевод: {a}")
+                await msg.answer(f"❌ Правильный перевод: <b>{a}</b>", parse_mode="HTML")
+                time.sleep(1)
                 a = random.choice(list(changer.data.keys()))
                 russian_word = changer.data[a]["Rword"]
                 await msg.answer(russian_word)
+                time.sleep(1)
                 await msg.answer("Введите английский перевод:")
                 await state.update_data(words=a, cnt=0, waiting_for_answer=True)
             else:
