@@ -1,3 +1,6 @@
+from changer import csv_to_dict
+
+
 class User:
     def __init__(self, Aword='' , Rword=''):
         self.Aword = Aword
@@ -17,11 +20,27 @@ class User:
     @staticmethod
     def get_all_users():
         users = {}
-        file = open('users.csv', 'r')
-        lines = file.readlines()
-        lines = lines[1:]
-        for line in lines:
-            data = line.split(',')
-            user = User(str(data[0]), str(data[1]))
-            users[str(data[0])] = user
-        return users
+        file = csv_to_dict("users.csv")
+        # file = open('users.csv', 'r')
+        # lines = file.readlines()
+        # lines = lines[1:]
+        # for line in lines:
+        #     data = line.split(',')
+        #     user = User(str(data[0]))
+        #     users[str(data[0])] = str(user)
+        return file
+
+
+
+
+
+
+
+
+
+print(User.get_all_users())
+
+
+
+
+
