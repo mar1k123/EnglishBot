@@ -15,7 +15,15 @@ import asyncio
 from datetime import datetime
 from typing import Callable
 import time
+import csv
+import os
 
+
+class DeleteStates(StatesGroup):
+    waiting_for_word = State()
+
+CSV_PATH = "Users.csv"
+DICT_PATH = "Storage.py"
 
 running_processes = True
 
@@ -56,9 +64,11 @@ users = {}
 @router.message(Command("start"))
 async def start_handler(msg: Message):
     await msg.answer("Привет, Я твой <i>English bot</i>, помогу тебе выучить английский быстрее✔"
-                     "\n\n<b>Доступные команды</b>:"
+                     "\n<b>Доступные команды</b>:"
                      "\n/add - добавить английское слово в список и его перевод"
-                     "\n/check - бот выведет слова на английском (2 попытки)👇", parse_mode="HTML")
+                     "\n/allwords - посмотреть все записанные слова"
+                     "\n/check - бот выведет слова на английском (2 попытки)👇"
+                     "\n/check_reverse - то же самое что и check, но выводит русские слова", parse_mode="HTML")
 
 
 
@@ -88,8 +98,6 @@ async def step_two(message: Message, state: FSMContext):
 
 
 
-
-
 @router.message(Reg.Rword)
 async def step_four(message: Message, state: FSMContext):
     users[f'{message.from_user.id}'].Rword = message.text
@@ -105,10 +113,92 @@ async def step_four(message: Message, state: FSMContext):
 
 
 
-@router.message(Command("allusers"))
+
+
+
+
+
+
+async def update_dictionary():
+    words_dict = {}
+    with open(CSV_PATH, mode='r', encoding='utf-8') as file:
+        reader = csv.DictReader(file)
+        for row in reader:
+            words_dict[row['Aword']] = row['Rword']
+
+    with open(DICT_PATH, mode='w', encoding='utf-8') as file:
+        file.write(f"words_dict = {words_dict}")
+
+
+@router.message(Command("delete_word"))
+async def handle_delete_word(message: Message, state: FSMContext):
+    await state.set_state(DeleteStates.waiting_for_word)
+    await message.answer(
+        "Введите английское слово для удаления (Aword):\n"
+        "Для отмены введите 'Стоп' или 'Stop'")
+
+
+@router.message(DeleteStates.waiting_for_word, F.text.lower().in_(["стоп", "stop"]))
+async def cancel_deletion(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "Удаление отменено")
+
+
+@router.message(DeleteStates.waiting_for_word)
+async def process_deletion(message: Message, state: FSMContext):
+    word_to_delete = message.text.strip().lower()
+    temp_file = "Users_temp.csv"
+    deleted = False
+
+    try:
+        with open(CSV_PATH, mode='r', encoding='utf-8') as infile, \
+                open(temp_file, mode='w', encoding='utf-8', newline='') as outfile:
+
+            reader = csv.DictReader(infile)
+            writer = csv.DictWriter(outfile, fieldnames=['Aword', 'Rword'])
+            writer.writeheader()
+
+            for row in reader:
+                if row['Aword'].lower() != word_to_delete:
+                    writer.writerow(row)
+                else:
+                    deleted = True
+
+        if deleted:
+            os.replace(temp_file, CSV_PATH)
+            await update_dictionary()
+            await message.answer(
+                f"✅ Слово '{word_to_delete}' удалено!\n"
+                "Введите следующее слово для удаления или 'Стоп' для отмены"
+            )
+        else:
+            os.remove(temp_file)
+            await message.answer(
+                f"❌ Слово '{word_to_delete}' не найдено\n"
+                "Введите другое слово или 'Стоп' для отмены"
+            )
+
+    except Exception as e:
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        await message.answer(
+            f"⚠️ Ошибка: {str(e)}\n"
+            "Попробуйте еще раз или введите 'Стоп' для отмены")
+
+
+
+
+@router.message(Command("allwords"))
 async def show_users(msg: Message):
-    for user in User.get_all_users().values():
-        await msg.answer(str(user))
+    c = User.get_all_users()
+    for user in c.keys():
+        word = c[user]
+        time.sleep(0.2)
+        await msg.answer(f"<b>Английско:</b> {word["Aword"]}\n\n"
+                         f"<b>Русское:</b> {word["Rword"]}", parse_mode="HTML")
+
+
 
 
 @router.message(Command("check"))
@@ -152,14 +242,6 @@ async def translate(msg: Message, state: FSMContext):
                 await state.update_data(cnt=cnt, waiting_for_answer=True)
     else:
         await state.update_data(waiting_for_answer=True)
-
-
-
-
-
-
-
-
 
 
 @router.message(Command("check_reverse"))
@@ -206,13 +288,6 @@ async def check_english(msg: Message, state: FSMContext):
                 await state.update_data(cnt=cnt, waiting_for_answer=True)
     else:
         await state.update_data(waiting_for_answer=True)
-
-
-
-
-
-
-
 
 
 @router.message()
