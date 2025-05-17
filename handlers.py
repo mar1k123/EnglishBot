@@ -294,14 +294,3 @@ async def check_english(msg: Message, state: FSMContext):
 @router.message()
 async def noCommands_handler(msg: Message):
     await msg.reply("Такой команды нету")
-
-
-
-
-
-
-
-
-
-
-

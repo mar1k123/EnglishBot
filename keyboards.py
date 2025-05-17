@@ -38,13 +38,3 @@ def add_button(user_telegram_id: int):
     button = KeyboardButton(text="Add words")
     keyboard = ReplyKeyboardMarkup(keyboard=[[button]])
     return keyboard
-
-
-
-
-
-
-
-
-
-

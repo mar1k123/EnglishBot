@@ -39,8 +39,3 @@ class User:
 
 
 print(User.get_all_users())
-
-
-
-
-

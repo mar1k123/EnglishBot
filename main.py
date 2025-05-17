@@ -16,5 +16,4 @@ async def main():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    # database.Base.metadata.create_all(bind=database.engine)
     asyncio.run(main())
