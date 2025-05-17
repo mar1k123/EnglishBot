@@ -9,7 +9,7 @@ from aiogram.types import Message, CallbackQuery, User, Chat, Update
 from pyexpat.errors import messages
 from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.fsm.context import FSMContext# нужен для управления состояниями
-import changer
+
 # from html import escape
 import asyncio
 from datetime import datetime
@@ -17,6 +17,100 @@ from typing import Callable
 import time
 import csv
 import os
+import sqlite3
+
+
+def init_db():
+    conn = sqlite3.connect('vocabulary_bot.db')
+    cursor = conn.cursor()
+
+    # Создаем таблицу пользователей, если ее нет
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY
+    )
+    ''')
+
+    # Создаем таблицу слов, если ее нет
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS words (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        aword TEXT,
+        rword TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (user_id)
+    )
+    ''')
+
+    conn.commit()
+    conn.close()
+
+
+# Инициализируем базу данных при старте
+init_db()
+
+def user_exists(user_id):
+    conn = sqlite3.connect('vocabulary_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+
+# Функция для добавления нового пользователя
+def add_user(user_id):
+    conn = sqlite3.connect('vocabulary_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
+    conn.commit()
+    conn.close()
+
+
+# Функция для добавления слова
+def add_word(user_id, aword, rword):
+    conn = sqlite3.connect('vocabulary_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO words (user_id, aword, rword) VALUES (?, ?, ?)',
+                   (user_id, aword, rword))
+    conn.commit()
+    conn.close()
+
+
+# Функция для получения всех слов пользователя
+def get_user_words(user_id):
+    conn = sqlite3.connect('vocabulary_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT aword, rword FROM words WHERE user_id = ?', (user_id,))
+    words = cursor.fetchall()
+    conn.close()
+
+    # Преобразуем в словарь для удобства
+    words_dict = {aword: rword for aword, rword in words}
+    return words_dict
+
+
+# Функция для получения случайного английского слова пользователя
+def get_random_aword(user_id):
+    conn = sqlite3.connect('vocabulary_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT aword FROM words WHERE user_id = ? ORDER BY RANDOM() LIMIT 1', (user_id,))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+
+
+# Функция для получения перевода по английскому слову
+def get_rword_by_aword(user_id, aword):
+    conn = sqlite3.connect('vocabulary_bot.db')
+    cursor = conn.cursor()
+    cursor.execute('SELECT rword FROM words WHERE user_id = ? AND aword = ?', (user_id, aword))
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result else None
+
+
+
 
 
 class DeleteStates(StatesGroup):
@@ -28,7 +122,6 @@ DICT_PATH = "Storage.py"
 running_processes = True
 
 import keyboards as kb
-from user import User
 # Def = DefaultBotProperties(parse_mode=ParseMode.HTML)
 
 running_processes = True
@@ -61,10 +154,20 @@ users = {}
 
 
 
+
+
+
+
 @router.message(Command("start"))
-async def start_handler(msg: Message):
-    await msg.answer("Привет, Я твой <i>English bot</i>, помогу тебе выучить английский быстрее✔"
-                     "\n<b>Доступные команды</b>:"
+async def start(message: Message):
+    user_id = message.from_user.id
+
+    if not user_exists(user_id):
+        add_user(user_id)
+        await message.answer("Привет! Я бот для изучения слов. Я создал для вас персональный словарь.")
+    else:
+        await message.answer("С возвращением! Ваш персональный словарь готов к использованию.")
+    await message.answer("\n<b>Доступные команды</b>:"
                      "\n/add - добавить английское слово в список и его перевод"
                      "\n/delete_word - удалить слово из словаря"
                      "\n/allwords - посмотреть все записанные слова"
@@ -73,10 +176,14 @@ async def start_handler(msg: Message):
 
 
 
-@router.message(F.text == "📜 Главное меню")
-async def main_menu_button_handler(msg: Message):
-    await msg.answer("Выбери одного из нас👇:",
-                     reply_markup=kb.main)
+
+
+# @router.message(F.text == "📜 Главное меню")
+# async def main_menu_button_handler(msg: Message):
+#     await msg.answer("Выбери одного из нас👇:",
+#                      reply_markup=kb.main)
+
+
 
 
 
@@ -84,33 +191,49 @@ async def main_menu_button_handler(msg: Message):
 
 @router.message(Command("add"))
 async def step_one(message: Message, state: FSMContext):
-    await state.set_state(Reg.Aword)
-    users[f'{message.from_user.id}'] = User(message.from_user.id)
-    await message.answer("Привет, введи английское слово:\n"
-                         "<i>Ты всегда можешь прекратить ввод слов, вписав в чат <b>'Cтоп'</b> или <b>'Stop'</b> 2 раза\n</i>", parse_mode="HTML")
+    user_id = message.from_user.id
+    if not user_exists(user_id):
+        add_user(user_id)
 
+    await state.set_state(Reg.Aword)
+    await message.answer("Привет, введи английское слово:\n"
+                         "<i>Ты всегда можешь прекратить ввод слов, вписав в чат <b>'Стоп'</b> или <b>'Stop'</b></i>",
+                         parse_mode="HTML")
 
 
 @router.message(Reg.Aword)
 async def step_two(message: Message, state: FSMContext):
-    users[f'{message.from_user.id}'].Aword = message.text
+    user_text = message.text.strip()
+    user_id = message.from_user.id
+
+    if user_text.lower() in ["стоп", "stop"]:
+        await message.answer("Вы приостановили ввод слов\nВыберите нужную вам команду👇")
+        await state.clear()
+        return
+
+    await state.update_data(aword=user_text)
     await state.set_state(Reg.Rword)
     await message.answer("Введите перевод:")
 
 
-
 @router.message(Reg.Rword)
 async def step_four(message: Message, state: FSMContext):
-    users[f'{message.from_user.id}'].Rword = message.text
-    user = users[f'{message.from_user.id}']
-    if message.text in ["Стоп","Stop"]:
+    user_text = message.text.strip()
+    user_id = message.from_user.id
+    data = await state.get_data()
+    aword = data.get('aword', '')
+
+    if user_text.lower() in ["стоп", "stop"]:
         await message.answer("Вы приостановили ввод слов\nВыберите нужную вам команду👇")
         await state.clear()
-    else:
-        user.save()
-        await message.answer(f"<b>Текущее</b>:\n{user}Введите больше", parse_mode="HTML")
-        await state.set_state(Reg.Aword)
-        await message.answer("Введите англ. слово")
+        return
+
+    # Добавляем слово в базу данных
+    add_word(user_id, aword, user_text)
+
+    await message.answer(f"<b>Добавлено слово:</b>\n{aword} - {user_text}\n\nВведите следующее английское слово:",
+                         parse_mode="HTML")
+    await state.set_state(Reg.Aword)
 
 
 
@@ -120,175 +243,272 @@ async def step_four(message: Message, state: FSMContext):
 
 
 
-async def update_dictionary():
-    words_dict = {}
-    with open(CSV_PATH, mode='r', encoding='utf-8') as file:
-        reader = csv.DictReader(file)
-        for row in reader:
-            words_dict[row['Aword']] = row['Rword']
 
-    with open(DICT_PATH, mode='w', encoding='utf-8') as file:
-        file.write(f"words_dict = {words_dict}")
 
 
 @router.message(Command("delete_word"))
-async def handle_delete_word(message: Message, state: FSMContext):
+async def delete_word_handler(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    if not user_exists(user_id):
+        await message.answer("❌ Ваш словарь пуст. Используйте /add")
+        return
+
     await state.set_state(DeleteStates.waiting_for_word)
-    await message.answer(
-        "Введите английское слово для удаления (Aword):\n"
-        "Для отмены введите 'Стоп' или 'Stop'")
-
-
-@router.message(DeleteStates.waiting_for_word, F.text.lower().in_(["стоп", "stop"]))
-async def cancel_deletion(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer(
-        "Удаление отменено")
+    await message.answer("📝 Введите английское слово для удаления:")
 
 
 @router.message(DeleteStates.waiting_for_word)
 async def process_deletion(message: Message, state: FSMContext):
-    word_to_delete = message.text.strip().lower()
-    temp_file = "Users_temp.csv"
-    deleted = False
+    user_id = message.from_user.id
+    word = message.text.strip()
 
+    conn = None
     try:
-        with open(CSV_PATH, mode='r', encoding='utf-8') as infile, \
-                open(temp_file, mode='w', encoding='utf-8', newline='') as outfile:
+        conn = sqlite3.connect('vocabulary_bot.db', timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        cursor = conn.cursor()
 
-            reader = csv.DictReader(infile)
-            writer = csv.DictWriter(outfile, fieldnames=['Aword', 'Rword'])
-            writer.writeheader()
+        # Проверка существования слова
+        cursor.execute("""
+            SELECT COUNT(*) FROM words 
+            WHERE user_id = ? AND LOWER(aword) = LOWER(?)
+        """, (user_id, word))
 
-            for row in reader:
-                if row['Aword'].lower() != word_to_delete:
-                    writer.writerow(row)
-                else:
-                    deleted = True
+        if cursor.fetchone()[0] == 0:
+            await message.answer(f"❌ Слово '{word}' не найдено")
+            return
 
-        if deleted:
-            os.replace(temp_file, CSV_PATH)
-            await update_dictionary()
-            await message.answer(
-                f"✅ Слово '{word_to_delete}' удалено!\n"
-                "Введите следующее слово для удаления или 'Стоп' для отмены"
-            )
+        # Удаление
+        cursor.execute("""
+            DELETE FROM words 
+            WHERE user_id = ? AND LOWER(aword) = LOWER(?)
+        """, (user_id, word))
+        conn.commit()
+
+        await message.answer(f"✅ Слово '{word}' удалено!")
+
+    except sqlite3.OperationalError as e:
+        if "locked" in str(e):
+            await message.answer("🔒 База временно заблокирована. Попробуйте через 5 секунд")
         else:
-            os.remove(temp_file)
-            await message.answer(
-                f"❌ Слово '{word_to_delete}' не найдено\n"
-                "Введите другое слово или 'Стоп' для отмены"
-            )
-
+            await message.answer(f"⚠️ Ошибка базы: {str(e)}")
     except Exception as e:
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
-        await message.answer(
-            f"⚠️ Ошибка: {str(e)}\n"
-            "Попробуйте еще раз или введите 'Стоп' для отмены")
+        await message.answer(f"⚠️ Ошибка: {str(e)}")
+    finally:
+        if conn:
+            conn.close()
+    await state.clear()
 
 
 
 
-@router.message(Command("allwords"))
-async def show_users(msg: Message):
-    c = User.get_all_users()
-    for user in c.keys():
-        word = c[user]
-        time.sleep(0.2)
-        await msg.answer(f"<b>Английско:</b> {word["Aword"]}\n\n"
-                         f"<b>Русское:</b> {word["Rword"]}", parse_mode="HTML")
+
+
+
+
+
+
+
 
 
 
 
 @router.message(Command("check"))
 async def random_ew(msg: Message, state: FSMContext):
+    user_id = msg.from_user.id
+    if not user_exists(user_id):
+        await msg.answer("Сначала добавьте слова с помощью команды /add")
+        return
+
+    words_dict = get_user_words(user_id)
+    if not words_dict:
+        await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
+        return
+
+    aword = random.choice(list(words_dict.keys()))
     await state.set_state(Words.Original)
-    a = random.choice(list(changer.data.keys()))
-    await msg.answer(a)
-    await msg.answer("Введите ответ:")
-    await state.update_data(words=a, cnt=0, waiting_for_answer=True)
+    await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
+    await msg.answer(aword)
+    await msg.answer("Введите перевод:")
 
 
 @router.message(Words.Original)
 async def translate(msg: Message, state: FSMContext):
+    user_id = msg.from_user.id
     data = await state.get_data()
-    a = data["words"]
+    aword = data["words"]
     cnt = data["cnt"]
     waiting_for_answer = data.get("waiting_for_answer", True)
 
-    if waiting_for_answer:
-        if msg.text.lower() == changer.data[a]["Rword"].lower():
-            await msg.reply("✅ Отличная работа!")
-            a = random.choice(list(changer.data.keys()))
-            await msg.answer(a)
-            await msg.answer("Введите ответ:")
-            await state.update_data(words=a, cnt=0, waiting_for_answer=True)
-        elif msg.text.lower() in ["стоп", "stop"]:
-            await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇", parse_mode="HTML")
+    if not waiting_for_answer:
+        return
+
+    rword = get_rword_by_aword(user_id, aword)
+    if not rword:
+        await msg.answer("Произошла ошибка. Попробуйте снова.")
+        await state.clear()
+        return
+
+    user_answer = msg.text.strip().lower()
+
+    if user_answer == rword.lower():
+        await msg.reply("✅ Отличная работа!")
+        words_dict = get_user_words(user_id)
+        if not words_dict:
+            await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
             await state.clear()
-        else:
-            cnt += 1
-            if cnt >= 2:
-                await msg.answer(f"❌ Правильный перевод: <b> {changer.data[a]['Rword']}</b>", parse_mode="HTML")
-                time.sleep(1)
-                a = random.choice(list(changer.data.keys()))
-                await msg.answer(a)
-                time.sleep(1)
-                await msg.answer("Введите ответ:")
-                await state.update_data(words=a, cnt=0, waiting_for_answer=True)
-            else:
-                await msg.answer("🔄 Попробуй еще раз")
-                await state.update_data(cnt=cnt, waiting_for_answer=True)
+            return
+
+        aword = random.choice(list(words_dict.keys()))
+        await msg.answer(aword)
+        await msg.answer("Введите перевод:")
+        await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
+    elif user_answer in ["стоп", "stop"]:
+        await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇", parse_mode="HTML")
+        await state.clear()
     else:
-        await state.update_data(waiting_for_answer=True)
+        cnt += 1
+        if cnt >= 2:
+            await msg.answer(f"❌ Правильный перевод: <b>{rword}</b>", parse_mode="HTML")
+            time.sleep(1)
+
+            words_dict = get_user_words(user_id)
+            if not words_dict:
+                await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
+                await state.clear()
+                return
+
+            aword = random.choice(list(words_dict.keys()))
+            await msg.answer(aword)
+            time.sleep(1)
+            await msg.answer("Введите перевод:")
+            await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
+        else:
+            await msg.answer("🔄 Попробуй еще раз")
+            await state.update_data(cnt=cnt, waiting_for_answer=True)
+
+
+
+
+
+
+
+
 
 
 @router.message(Command("check_reverse"))
 async def random_rw(msg: Message, state: FSMContext):
+    user_id = msg.from_user.id
+    if not user_exists(user_id):
+        await msg.answer("Сначала добавьте слова с помощью команды /add")
+        return
+
+    words_dict = get_user_words(user_id)
+    if not words_dict:
+        await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
+        return
+
+    aword = random.choice(list(words_dict.keys()))
+    rword = words_dict[aword]
+
     await state.set_state(Words.Translate)
-    a = random.choice(list(changer.data.keys()))
-    russian_word = changer.data[a]["Rword"]
-    await msg.answer(russian_word)
+    await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
+    await msg.answer(rword)
     await msg.answer("Введите английский перевод:")
-    await state.update_data(words=a, cnt=0, waiting_for_answer=True)
 
 
 @router.message(Words.Translate)
 async def check_english(msg: Message, state: FSMContext):
+    user_id = msg.from_user.id
     data = await state.get_data()
-    a = data["words"]
+    aword = data["words"]
     cnt = data["cnt"]
     waiting_for_answer = data.get("waiting_for_answer", True)
 
-    if waiting_for_answer:
-        if msg.text.lower() == a.lower():
-            await msg.reply("✅ Отличная работа!")
-            a = random.choice(list(changer.data.keys()))
-            russian_word = changer.data[a]["Rword"]
-            await msg.answer(russian_word)
-            await msg.answer("Введите английский перевод:")
-            await state.update_data(words=a, cnt=0, waiting_for_answer=True)
-        elif msg.text.lower() in ["стоп", "stop"]:
-            await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇", parse_mode="HTML")
+    if not waiting_for_answer:
+        return
+
+    user_answer = msg.text.strip().lower()
+
+    if user_answer == aword.lower():
+        await msg.reply("✅ Отличная работа!")
+        words_dict = get_user_words(user_id)
+        if not words_dict:
+            await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
             await state.clear()
-        else:
-            cnt += 1
-            if cnt >= 2:
-                await msg.answer(f"❌ Правильный перевод: <b>{a}</b>", parse_mode="HTML")
-                time.sleep(1)
-                a = random.choice(list(changer.data.keys()))
-                russian_word = changer.data[a]["Rword"]
-                await msg.answer(russian_word)
-                time.sleep(1)
-                await msg.answer("Введите английский перевод:")
-                await state.update_data(words=a, cnt=0, waiting_for_answer=True)
-            else:
-                await msg.answer("🔄 Попробуй еще раз")
-                await state.update_data(cnt=cnt, waiting_for_answer=True)
+            return
+
+        aword = random.choice(list(words_dict.keys()))
+        rword = words_dict[aword]
+        await msg.answer(rword)
+        await msg.answer("Введите английский перевод:")
+        await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
+    elif user_answer in ["стоп", "stop"]:
+        await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇", parse_mode="HTML")
+        await state.clear()
     else:
-        await state.update_data(waiting_for_answer=True)
+        cnt += 1
+        if cnt >= 2:
+            await msg.answer(f"❌ Правильный перевод: <b>{aword}</b>", parse_mode="HTML")
+            time.sleep(1)
+
+            words_dict = get_user_words(user_id)
+            if not words_dict:
+                await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
+                await state.clear()
+                return
+
+            aword = random.choice(list(words_dict.keys()))
+            rword = words_dict[aword]
+            await msg.answer(rword)
+            time.sleep(1)
+            await msg.answer("Введите английский перевод:")
+            await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
+        else:
+            await msg.answer("🔄 Попробуй еще раз")
+            await state.update_data(cnt=cnt, waiting_for_answer=True)
+
+
+
+
+
+
+
+
+
+@router.message(Command("allwords"))
+async def show_my_words(message: Message):
+    user_id = message.from_user.id
+    words = get_user_words(user_id)
+
+    if not words:
+        await message.answer("Ваш словарь пуст. Добавьте слова с помощью /add")
+        return
+
+    response = "📚 Ваш словарь:\n\n"
+    for aword, rword in words.items():
+        response += f"{aword} - {rword}\n"
+
+    # Разбиваем на части, если сообщение слишком длинное
+    if len(response) > 4000:
+        for x in range(0, len(response), 4000):
+            await message.answer(response[x:x + 4000])
+    else:
+        await message.answer(response)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 @router.message()
