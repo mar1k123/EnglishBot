@@ -9,6 +9,10 @@ from aiogram.types import Message, CallbackQuery, User, Chat, Update
 from pyexpat.errors import messages
 from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.fsm.context import FSMContext# нужен для управления состояниями
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.filters import Command
+from datetime import datetime, timedelta
+
 
 # from html import escape
 import asyncio
@@ -18,6 +22,12 @@ import time
 import csv
 import os
 import sqlite3
+
+
+
+
+
+
 
 
 def init_db():
@@ -140,6 +150,7 @@ class Reg(StatesGroup):  #класс нужен для состояния
 
 
 class TimerStates(StatesGroup):
+    SETTING_INTERVAL = State()
     waiting_interval = State()
 
 
@@ -164,7 +175,7 @@ async def start(message: Message):
 
     if not user_exists(user_id):
         add_user(user_id)
-        await message.answer("Привет! Я бот для изучения слов. Я создал для вас персональный словарь.")
+        await message.answer("Привет! Я бот для изучения слов. Я создам для вас персональный словарь.")
     else:
         await message.answer("С возвращением! Ваш персональный словарь готов к использованию.")
     await message.answer("\n<b>Доступные команды</b>:"
@@ -183,6 +194,33 @@ async def start(message: Message):
 #     await msg.answer("Выбери одного из нас👇:",
 #                      reply_markup=kb.main)
 
+
+
+@router.message(Command("myid"))
+async def get_my_id(message: Message):
+    await message.answer(f"Ваш ID: `{message.from_user.id}`", parse_mode="Markdown")
+
+
+
+@router.message(Command("allwords"))
+async def show_my_words(message: Message):
+    user_id = message.from_user.id
+    words = get_user_words(user_id)
+
+    if not words:
+        await message.answer("Ваш словарь пуст. Добавьте слова с помощью /add")
+        return
+
+    response = "📚 Ваш словарь:\n\n"
+    for aword, rword in words.items():
+        response += f"{aword} - {rword}\n"
+
+    # Разбиваем на части, если сообщение слишком длинное
+    if len(response) > 4000:
+        for x in range(0, len(response), 4000):
+            await message.answer(response[x:x + 4000])
+    else:
+        await message.answer(response)
 
 
 
@@ -467,46 +505,6 @@ async def check_english(msg: Message, state: FSMContext):
         else:
             await msg.answer("🔄 Попробуй еще раз")
             await state.update_data(cnt=cnt, waiting_for_answer=True)
-
-
-
-
-
-
-
-
-
-@router.message(Command("allwords"))
-async def show_my_words(message: Message):
-    user_id = message.from_user.id
-    words = get_user_words(user_id)
-
-    if not words:
-        await message.answer("Ваш словарь пуст. Добавьте слова с помощью /add")
-        return
-
-    response = "📚 Ваш словарь:\n\n"
-    for aword, rword in words.items():
-        response += f"{aword} - {rword}\n"
-
-    # Разбиваем на части, если сообщение слишком длинное
-    if len(response) > 4000:
-        for x in range(0, len(response), 4000):
-            await message.answer(response[x:x + 4000])
-    else:
-        await message.answer(response)
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
