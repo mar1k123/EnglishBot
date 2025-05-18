@@ -10,8 +10,19 @@ from pyexpat.errors import messages
 from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.fsm.context import FSMContext# нужен для управления состояниями
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.filters import Command
 from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+
+from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
+# В самом начале handlers.py
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram import Router
+from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+
+# Правильный импорт:
+
+
 
 
 # from html import escape
@@ -22,6 +33,36 @@ import time
 import csv
 import os
 import sqlite3
+import sys
+from database import init_db
+import keyboards
+
+
+
+
+def get_levels_keyboard() -> ReplyKeyboardMarkup:
+    builder = ReplyKeyboardBuilder()
+    levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+
+    for level in levels:
+        builder.button(text=f"Уровень {level}")
+
+    builder.button(text="Отмена")
+    builder.adjust(2)
+    return builder.as_markup(resize_keyboard=True)
+
+
+
+
+
+
+class QuizStates(StatesGroup):
+    SELECTING_MODE = State()
+    SELECTING_LEVEL = State()
+    ANSWERING = State()
+
+
+DB_PATH = os.path.join(os.path.dirname(__file__), 'vocabulary_bot.db')
 
 
 
@@ -30,37 +71,9 @@ import sqlite3
 
 
 
-def init_db():
-    conn = sqlite3.connect('vocabulary_bot.db')
-    cursor = conn.cursor()
-
-    # Создаем таблицу пользователей, если ее нет
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY
-    )
-    ''')
-
-    # Создаем таблицу слов, если ее нет
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS words (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        aword TEXT,
-        rword TEXT,
-        FOREIGN KEY (user_id) REFERENCES users (user_id)
-    )
-    ''')
-
-    conn.commit()
-    conn.close()
-
-
-# Инициализируем базу данных при старте
-init_db()
-
-def user_exists(user_id):
-    conn = sqlite3.connect('vocabulary_bot.db')
+#Проверяет существование пользователя
+def user_exists(user_id: int) -> bool:
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
     exists = cursor.fetchone() is not None
@@ -68,56 +81,92 @@ def user_exists(user_id):
     return exists
 
 
-# Функция для добавления нового пользователя
-def add_user(user_id):
-    conn = sqlite3.connect('vocabulary_bot.db')
+#Добавляет нового пользователя
+def add_user(user_id: int):
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
     conn.commit()
     conn.close()
 
 
-# Функция для добавления слова
-def add_word(user_id, aword, rword):
-    conn = sqlite3.connect('vocabulary_bot.db')
+#Добавляет слово в словарь пользователя
+def add_word(user_id: int, aword: str, rword: str):
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO words (user_id, aword, rword) VALUES (?, ?, ?)',
-                   (user_id, aword, rword))
+    cursor.execute(
+        'INSERT INTO words (user_id, aword, rword) VALUES (?, ?, ?)',
+        (user_id, aword, rword)
+    )
     conn.commit()
     conn.close()
 
 
-# Функция для получения всех слов пользователя
-def get_user_words(user_id):
-    conn = sqlite3.connect('vocabulary_bot.db')
+
+
+def get_user_words(user_id: int) -> dict:
+    """Получить личные слова пользователя"""
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT aword, rword FROM words WHERE user_id = ?', (user_id,))
-    words = cursor.fetchall()
+    cursor.execute("SELECT aword, rword FROM words WHERE user_id = ?", (user_id,))
+    rows = cursor.fetchall()
     conn.close()
+    return {aword: rword for aword, rword in rows} if rows else {}
 
-    # Преобразуем в словарь для удобства
-    words_dict = {aword: rword for aword, rword in words}
-    return words_dict
-
-
-# Функция для получения случайного английского слова пользователя
-def get_random_aword(user_id):
-    conn = sqlite3.connect('vocabulary_bot.db')
+#Получает случайное английское слово пользователя
+def get_random_aword(user_id: int) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT aword FROM words WHERE user_id = ? ORDER BY RANDOM() LIMIT 1', (user_id,))
+    cursor.execute('''
+        SELECT aword FROM words 
+        WHERE user_id = ? 
+        ORDER BY RANDOM() 
+        LIMIT 1
+    ''', (user_id,))
     result = cursor.fetchone()
     conn.close()
     return result[0] if result else None
 
 
-# Функция для получения перевода по английскому слову
-def get_rword_by_aword(user_id, aword):
-    conn = sqlite3.connect('vocabulary_bot.db')
+
+#Получает перевод по английскому слову
+def get_rword_by_aword(user_id: int, aword: str) -> Optional[str]:
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute('SELECT rword FROM words WHERE user_id = ? AND aword = ?', (user_id, aword))
+    cursor.execute('''
+        SELECT rword FROM words 
+        WHERE user_id = ? AND aword = ?
+    ''', (user_id, aword))
     result = cursor.fetchone()
     conn.close()
     return result[0] if result else None
+
+
+def get_common_words(level: str) -> dict:
+    """Получить слова для уровня из базы данных"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT english, russian FROM common_words WHERE level = ?", (level,))
+    rows = cursor.fetchall()
+    conn.close()
+    return {eng: rus for eng, rus in rows}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -342,9 +391,23 @@ async def process_deletion(message: Message, state: FSMContext):
 
 
 
+async def ask_next_word(msg: Message, state: FSMContext):
+    """Задать следующее слово"""
+    data = await state.get_data()
+    words = data['words']
 
+    if not words:
+        await state.clear()
+        return await msg.answer("Слова закончились!", reply_markup=ReplyKeyboardRemove())
 
-
+    aword = random.choice(list(words.keys()))
+    await state.update_data({
+        "current_word": aword,
+        "attempts": 0,
+        "correct_answer": words[aword],
+        "remaining_words": {k: v for k, v in words.items() if k != aword}
+    })
+    await msg.answer(f"🇬🇧 Слово: {aword}\nВведите перевод:")
 
 
 
@@ -352,80 +415,101 @@ async def process_deletion(message: Message, state: FSMContext):
 
 
 @router.message(Command("check"))
-async def random_ew(msg: Message, state: FSMContext):
-    user_id = msg.from_user.id
-    if not user_exists(user_id):
-        await msg.answer("Сначала добавьте слова с помощью команды /add")
-        return
+async def start_check(msg: Message, state: FSMContext):
+    """Начало проверки с выбором режима"""
+    await state.set_state(QuizStates.SELECTING_MODE)
+    await msg.answer(
+        "Выберите режим:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Личные слова")],
+                [KeyboardButton(text="Общий словарь")],
+                [KeyboardButton(text="Отмена")]
+            ],
+            resize_keyboard=True
+        )
+    )
 
-    words_dict = get_user_words(user_id)
-    if not words_dict:
-        await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
-        return
-
-    aword = random.choice(list(words_dict.keys()))
-    await state.set_state(Words.Original)
-    await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
-    await msg.answer(aword)
-    await msg.answer("Введите перевод:")
-
-
-@router.message(Words.Original)
-async def translate(msg: Message, state: FSMContext):
-    user_id = msg.from_user.id
-    data = await state.get_data()
-    aword = data["words"]
-    cnt = data["cnt"]
-    waiting_for_answer = data.get("waiting_for_answer", True)
-
-    if not waiting_for_answer:
-        return
-
-    rword = get_rword_by_aword(user_id, aword)
-    if not rword:
-        await msg.answer("Произошла ошибка. Попробуйте снова.")
+@router.message(QuizStates.SELECTING_MODE)
+async def select_mode(msg: Message, state: FSMContext):
+    """Обработка выбора режима"""
+    if msg.text == "Отмена":
         await state.clear()
-        return
+        return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
 
-    user_answer = msg.text.strip().lower()
-
-    if user_answer == rword.lower():
-        await msg.reply("✅ Отличная работа!")
-        words_dict = get_user_words(user_id)
-        if not words_dict:
-            await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
+    if msg.text == "Личные слова":
+        words = get_user_words(msg.from_user.id)
+        if not words:
             await state.clear()
-            return
+            return await msg.answer("Ваш словарь пуст. Добавьте слова через /add")
 
-        aword = random.choice(list(words_dict.keys()))
-        await msg.answer(aword)
-        await msg.answer("Введите перевод:")
-        await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
-    elif user_answer in ["стоп", "stop"]:
-        await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇", parse_mode="HTML")
+        await state.set_state(QuizStates.ANSWERING)
+        await state.update_data({
+            "words": words,
+            "mode": "personal",
+            "level": None
+        })
+        await msg.answer("Режим: личные слова", reply_markup=ReplyKeyboardRemove())
+        return await ask_next_word(msg, state)
+
+    if msg.text == "Общий словарь":
+        await state.set_state(QuizStates.SELECTING_LEVEL)
+        return await msg.answer(
+            "Выберите уровень:",
+            reply_markup=get_levels_keyboard()
+        )
+
+    await msg.answer("Пожалуйста, выберите вариант из клавиатуры")
+
+
+@router.message(QuizStates.SELECTING_LEVEL)
+async def select_level(msg: Message, state: FSMContext):
+    """Обработка выбора уровня"""
+    if msg.text == "Отмена":
         await state.clear()
-    else:
-        cnt += 1
-        if cnt >= 2:
-            await msg.answer(f"❌ Правильный перевод: <b>{rword}</b>", parse_mode="HTML")
-            time.sleep(1)
+        return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
 
-            words_dict = get_user_words(user_id)
-            if not words_dict:
-                await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
-                await state.clear()
-                return
+    level = msg.text.replace("Уровень ", "").strip().upper()
+    words = get_common_words(level)
 
-            aword = random.choice(list(words_dict.keys()))
-            await msg.answer(aword)
-            time.sleep(1)
-            await msg.answer("Введите перевод:")
-            await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
-        else:
-            await msg.answer("🔄 Попробуй еще раз")
-            await state.update_data(cnt=cnt, waiting_for_answer=True)
+    if not words:
+        return await msg.answer(f"Для уровня {level} пока нет слов")
+
+    await state.set_state(QuizStates.ANSWERING)
+    await state.update_data({
+        "words": words,
+        "mode": "common",
+        "level": level
+    })
+    await msg.answer(f"Выбран уровень: {level}", reply_markup=ReplyKeyboardRemove())
+    await ask_next_word(msg, state)
 
 
+@router.message(QuizStates.ANSWERING)
+async def check_answer(msg: Message, state: FSMContext):
+    """Проверка ответа"""
+    data = await state.get_data()
+
+    if msg.text.lower() in ["стоп", "stop", "отмена"]:
+        await state.clear()
+        return await msg.answer("Проверка завершена", reply_markup=ReplyKeyboardRemove())
+
+    correct = data['correct_answer']
+    user_answer = msg.text.lower()
+
+    if user_answer == correct.lower():
+        await msg.reply("✅ Верно!")
+        await state.update_data({"words": data.get("remaining_words", {})})
+        return await ask_next_word(msg, state)
+
+    attempts = data['attempts'] + 1
+    if attempts >= 2:
+        await msg.answer(f"❌ Правильно: {correct}")
+        await state.update_data({"words": data.get("remaining_words", {})})
+        return await ask_next_word(msg, state)
+
+    await state.update_data({"attempts": attempts})
+    await msg.reply("🔄 Попробуйте еще раз")
 
 
 
