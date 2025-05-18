@@ -1,14 +1,18 @@
 from aiogram.types import (ReplyKeyboardMarkup,KeyboardButton,
                            InlineKeyboardMarkup, InlineKeyboardButton) #тож самое что и Reply только Inline
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder # Заимпортил билдер (он нужен для того, чтобы не менять знаения через код)
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.types import ReplyKeyboardMarkup
+from aiogram.utils.keyboard import ReplyKeyboardBuilder
+from aiogram.types import KeyboardButton
+
+
+
 
 main = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton (text="add")],
     [KeyboardButton(text="tryMe")]
 ],                              resize_keyboard=True)
-
-
-
 
 
 
