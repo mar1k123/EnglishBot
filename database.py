@@ -1,69 +1,39 @@
 import sqlite3
 import sys
 import os
+from pathlib import Path
+import csv
 DB_PATH = os.path.join(os.path.dirname(__file__), 'vocabulary_bot.db')
+COMMON_WORDS_CSV = "common_words.csv"
 
 
 #Инициализация всех таблиц базы данных
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Таблица пользователей
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY
-    )
-    ''')
-
-    # Таблица личных слов
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS words (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        aword TEXT,
-        rword TEXT,
-        FOREIGN KEY (user_id) REFERENCES users (user_id)
-    )
-    ''')
-
-    # Таблица общих слов
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS common_words (
-        level TEXT,
-        english TEXT,
-        russian TEXT,
-        PRIMARY KEY (level, english)
-    )
-    ''')
-
-    # Заполнение общими словами при первом запуске
-    cursor.execute("SELECT count(*) FROM common_words")
-    if cursor.fetchone()[0] == 0:
-        default_words = {
+def init_common_words():
+    if not Path(COMMON_WORDS_CSV).exists():
+        common_words = {
             'A1': [
-        ('hello', 'привет'), ('book', 'книга'), ('cat', 'кот'), ('dog', 'собака'), ('apple', 'яблоко'),
-        ('car', 'машина'), ('house', 'дом'), ('water', 'вода'), ('food', 'еда'), ('friend', 'друг'),
-        ('school', 'школа'), ('family', 'семья'), ('day', 'день'), ('night', 'ночь'), ('sun', 'солнце'),
-        ('moon', 'луна'), ('tree', 'дерево'), ('flower', 'цветок'), ('bird', 'птица'), ('fish', 'рыба'),
-        ('milk', 'молоко'), ('bread', 'хлеб'), ('chair', 'стул'), ('table', 'стол'), ('pen', 'ручка'),
-        ('phone', 'телефон'), ('computer', 'компьютер'), ('window', 'окно'), ('door', 'дверь'), ('street', 'улица'),
-        ('city', 'город'), ('country', 'страна'), ('money', 'деньги'), ('time', 'время'), ('year', 'год'),
-        ('week', 'неделя'), ('month', 'месяц'), ('morning', 'утро'), ('evening', 'вечер'), ('cold', 'холодный'),
-        ('hot', 'горячий'), ('big', 'большой'), ('small', 'маленький'), ('happy', 'счастливый'), ('sad', 'грустный'),
-        ('fast', 'быстрый'), ('slow', 'медленный'), ('new', 'новый'), ('old', 'старый'), ('good', 'хороший'),
-        ('bad', 'плохой'), ('yes', 'да'), ('no', 'нет'), ('please', 'пожалуйста'), ('thank you', 'спасибо'),
-        ('sorry', 'извините'), ('help', 'помощь'), ('stop', 'стоп'), ('go', 'идти'), ('come', 'приходить'),
-        ('see', 'видеть'), ('hear', 'слышать'), ('eat', 'есть'), ('drink', 'пить'), ('sleep', 'спать'),
-        ('read', 'читать'), ('write', 'писать'), ('run', 'бежать'), ('walk', 'ходить'), ('play', 'играть'),
-        ('work', 'работать'), ('love', 'любить'), ('like', 'нравиться'), ('want', 'хотеть'), ('need', 'нуждаться'),
-        ('think', 'думать'), ('know', 'знать'), ('understand', 'понимать'), ('learn', 'учить'), ('teach', 'учить'),
-        ('open', 'открывать'), ('close', 'закрывать'), ('buy', 'покупать'), ('sell', 'продавать'), ('wait', 'ждать'),
-        ('call', 'звонить'), ('answer', 'отвечать'), ('ask', 'спрашивать'), ('tell', 'рассказывать'), ('show', 'показывать'),
-        ('clean', 'чистить'), ('wash', 'мыть'), ('drive', 'водить'), ('fly', 'летать'), ('swim', 'плавать'),
-        ('jump', 'прыгать'), ('sit', 'сидеть'), ('stand', 'стоять'), ('turn', 'поворачивать'), ('help', 'помогать')
+                ('hello', 'привет'), ('book', 'книга'), ('cat', 'кот'), ('dog', 'собака'), ('apple', 'яблоко'),
+                ('car', 'машина'), ('house', 'дом'), ('water', 'вода'), ('food', 'еда'), ('friend', 'друг'),
+                ('school', 'школа'), ('family', 'семья'), ('day', 'день'), ('night', 'ночь'), ('sun', 'солнце'),
+                ('moon', 'луна'), ('tree', 'дерево'), ('flower', 'цветок'), ('bird', 'птица'), ('fish', 'рыба'),
+                ('milk', 'молоко'), ('bread', 'хлеб'), ('chair', 'стул'), ('table', 'стол'), ('pen', 'ручка'),
+                ('phone', 'телефон'), ('computer', 'компьютер'), ('window', 'окно'), ('door', 'дверь'), ('street', 'улица'),
+                ('city', 'город'), ('country', 'страна'), ('money', 'деньги'), ('time', 'время'), ('year', 'год'),
+                ('week', 'неделя'), ('month', 'месяц'), ('morning', 'утро'), ('evening', 'вечер'), ('cold', 'холодный'),
+                ('hot', 'горячий'), ('big', 'большой'), ('small', 'маленький'), ('happy', 'счастливый'), ('sad', 'грустный'),
+                ('fast', 'быстрый'), ('slow', 'медленный'), ('new', 'новый'), ('old', 'старый'), ('good', 'хороший'),
+                ('bad', 'плохой'), ('yes', 'да'), ('no', 'нет'), ('please', 'пожалуйста'), ('thank you', 'спасибо'),
+                ('sorry', 'извините'), ('help', 'помощь'), ('stop', 'стоп'), ('go', 'идти'), ('come', 'приходить'),
+                ('see', 'видеть'), ('hear', 'слышать'), ('eat', 'есть'), ('drink', 'пить'), ('sleep', 'спать'),
+                ('read', 'читать'), ('write', 'писать'), ('run', 'бежать'), ('walk', 'ходить'), ('play', 'играть'),
+                ('work', 'работать'), ('love', 'любить'), ('like', 'нравиться'), ('want', 'хотеть'), ('need', 'нуждаться'),
+                ('think', 'думать'), ('know', 'знать'), ('understand', 'понимать'), ('learn', 'учить'), ('teach', 'учить'),
+                ('open', 'открывать'), ('close', 'закрывать'), ('buy', 'покупать'), ('sell', 'продавать'), ('wait', 'ждать'),
+                ('call', 'звонить'), ('answer', 'отвечать'), ('ask', 'спрашивать'), ('tell', 'рассказывать'), ('show', 'показывать'),
+                ('clean', 'чистить'), ('wash', 'мыть'), ('drive', 'водить'), ('fly', 'летать'), ('swim', 'плавать'),
+                ('jump', 'прыгать'), ('sit', 'сидеть'), ('stand', 'стоять'), ('turn', 'поворачивать'), ('help', 'помогать')
 
-],
+            ],
             "A2": [
                 ('always', 'всегда'), ('because', 'потому что'), ('before', 'до'), ('between', 'между'),
                 ('breakfast', 'завтрак'),
@@ -488,16 +458,12 @@ def init_db():
                 ('voluble', 'говорливый'), ('wanton', 'беспричинный'), ('wizened', 'сморщенный'), ('zealous', 'рьяный')
             ]
         }
-        for level, words in default_words.items():
-            for eng, rus in words:
-                cursor.execute(
-                    "INSERT OR IGNORE INTO common_words VALUES (?, ?, ?)",
-                    (level, eng, rus)
-                )
+        with open(COMMON_WORDS_CSV, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['level', 'english', 'russian'])
+            for level, words in common_words.items():
+                for eng, rus in words:
+                    writer.writerow([level, eng, rus])
 
-    conn.commit()
-    conn.close()
+init_common_words()
 
-
-# Вызываем инициализацию при импорте
-init_db()

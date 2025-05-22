@@ -16,6 +16,16 @@ main = ReplyKeyboardMarkup(keyboard=[
 
 
 
+def get_levels_keyboard() -> ReplyKeyboardMarkup:
+    builder = ReplyKeyboardBuilder()
+    levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+
+    for level in levels:
+        builder.button(text=f"Уровень {level}")
+
+    builder.button(text="Отмена")
+    builder.adjust(2)
+    return builder.as_markup(resize_keyboard=True)
 
 
 
@@ -24,21 +34,21 @@ main = ReplyKeyboardMarkup(keyboard=[
 My_Profile = ["Git Hub"]
 
 
-async def inline_profile(): #создали асинхронную функцию
-    keyboard = InlineKeyboardBuilder()
-    for profile in My_Profile: #rage для предметов в моих предметах
-        keyboard.add(InlineKeyboardButton(text=profile, url="https://github.com/mar1k123?tab=repositories")) # добавили инлайн кнопки и в них ссылка
-    return keyboard.adjust(1).as_markup() #adjust (2 or ....) - сколько кнопок будет в одном ряду, а as_markup() по дефолту
-
-
-
-def main_menu_button(user_telegram_id: int):
-    button = KeyboardButton(text="📜 Главное меню")
-    keyboard = ReplyKeyboardMarkup(keyboard=[[button]], resize_keyboard=True)
-    return keyboard
-
-
-def add_button(user_telegram_id: int):
-    button = KeyboardButton(text="Add words")
-    keyboard = ReplyKeyboardMarkup(keyboard=[[button]])
-    return keyboard
+# async def inline_profile(): #создали асинхронную функцию
+#     keyboard = InlineKeyboardBuilder()
+#     for profile in My_Profile: #rage для предметов в моих предметах
+#         keyboard.add(InlineKeyboardButton(text=profile, url="https://github.com/mar1k123?tab=repositories")) # добавили инлайн кнопки и в них ссылка
+#     return keyboard.adjust(1).as_markup() #adjust (2 or ....) - сколько кнопок будет в одном ряду, а as_markup() по дефолту
+#
+#
+#
+# def main_menu_button(user_telegram_id: int):
+#     button = KeyboardButton(text="📜 Главное меню")
+#     keyboard = ReplyKeyboardMarkup(keyboard=[[button]], resize_keyboard=True)
+#     return keyboard
+#
+#
+# def add_button(user_telegram_id: int):
+#     button = KeyboardButton(text="Add words")
+#     keyboard = ReplyKeyboardMarkup(keyboard=[[button]])
+#     return keyboard

@@ -11,17 +11,15 @@ from aiogram.fsm.state import StatesGroup, State, default_state
 from aiogram.fsm.context import FSMContext# нужен для управления состояниями
 from aiogram.fsm.state import StatesGroup, State
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
-
+from typing import Dict, List, Optional, Tuple
 from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
-# В самом начале handlers.py
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram import Router
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-
-# Правильный импорт:
-
+from keyboards import get_levels_keyboard
+import keyboards as kb
 
 
 
@@ -34,44 +32,15 @@ import csv
 import os
 import sqlite3
 import sys
-from database import init_db
+from database import init_common_words
 import keyboards
+import config
 
 
+'''--------------------------------------------------------------------------------------------------------------------------------------'''
+#SQLite functions
 
-
-def get_levels_keyboard() -> ReplyKeyboardMarkup:
-    builder = ReplyKeyboardBuilder()
-    levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
-
-    for level in levels:
-        builder.button(text=f"Уровень {level}")
-
-    builder.button(text="Отмена")
-    builder.adjust(2)
-    return builder.as_markup(resize_keyboard=True)
-
-
-
-
-
-
-class QuizStates(StatesGroup):
-    SELECTING_MODE = State()
-    SELECTING_LEVEL = State()
-    ANSWERING = State()
-
-
-DB_PATH = os.path.join(os.path.dirname(__file__), 'vocabulary_bot.db')
-
-
-
-
-
-
-
-
-#Проверяет существование пользователя
+# Проверяет существование пользователя
 def user_exists(user_id: int) -> bool:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -81,7 +50,8 @@ def user_exists(user_id: int) -> bool:
     return exists
 
 
-#Добавляет нового пользователя
+
+# Добавляет нового пользователя
 def add_user(user_id: int):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -89,8 +59,7 @@ def add_user(user_id: int):
     conn.commit()
     conn.close()
 
-
-#Добавляет слово в словарь пользователя
+# Добавляет слово в словарь пользователя
 def add_word(user_id: int, aword: str, rword: str):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -103,9 +72,8 @@ def add_word(user_id: int, aword: str, rword: str):
 
 
 
-
-def get_user_words(user_id: int) -> dict:
-    """Получить личные слова пользователя"""
+# Получить личные слова пользователя
+def get_user_words(user_id: int) -> Dict[str, str]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT aword, rword FROM words WHERE user_id = ?", (user_id,))
@@ -113,7 +81,8 @@ def get_user_words(user_id: int) -> dict:
     conn.close()
     return {aword: rword for aword, rword in rows} if rows else {}
 
-#Получает случайное английское слово пользователя
+
+# Получает случайное английское слово пользователя
 def get_random_aword(user_id: int) -> Optional[str]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -129,7 +98,7 @@ def get_random_aword(user_id: int) -> Optional[str]:
 
 
 
-#Получает перевод по английскому слову
+# Получает перевод по английскому слову
 def get_rword_by_aword(user_id: int, aword: str) -> Optional[str]:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -140,57 +109,90 @@ def get_rword_by_aword(user_id: int, aword: str) -> Optional[str]:
     result = cursor.fetchone()
     conn.close()
     return result[0] if result else None
-
-
-def get_common_words(level: str) -> dict:
-    """Получить слова для уровня из базы данных"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT english, russian FROM common_words WHERE level = ?", (level,))
-    rows = cursor.fetchall()
-    conn.close()
-    return {eng: rus for eng, rus in rows}
+'''-----------------------------------------------------------------------------------------------------------------------------'''
 
 
 
 
+'''CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV'''
+
+# Получает общие слова из CSV по уровню
+def get_common_words(level: str) -> Dict[str, str]:
+    words = {}
+    with open(COMMON_WORDS_CSV, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row['level'] == level:
+                words[row['english']] = row['russian']
+    return words
+
+
+
+# Получает случайное слово из общих слов по уровню
+def get_random_common_word(level: str) -> Optional[Tuple[str, str]]:
+    words = []
+    with open(COMMON_WORDS_CSV, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            if row['level'] == level:
+                words.append((row['english'], row['russian']))
+    return random.choice(words) if words else None
+
+
+
+#Получить все доступные уровни из CSV файла с общими словами
+def get_available_levels() -> List[str]:
+    levels = set()  # Используем set для автоматического удаления дубликатов
+
+    try:
+        with open(COMMON_WORDS_CSV, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if 'level' in row:  # Проверяем наличие колонки level
+                    levels.add(row['level'])
+    except FileNotFoundError:
+        print(f"Файл {COMMON_WORDS_CSV} не найден. Создаём новый...")
+        init_common_words()  # Пытаемся создать файл, если его нет
+        return get_available_levels()  # Рекурсивно вызываем себя после создания файла
+    except Exception as e:
+        print(f"Ошибка при чтении CSV файла: {e}")
+        return []
+
+    # Сортируем уровни в правильном порядке (A1, A2, B1, B2, C1, C2)
+    sorted_levels = sorted(levels, key=lambda x: (x[0], int(x[1])))
+    return sorted_levels
+
+'''CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV '''
 
 
 
 
 
+class Words(StatesGroup):
+    Translate = State()
 
 
-
-
-
-
-
-
-
-
+class QuizStates(StatesGroup):
+    SELECTING_MODE = State()
+    SELECTING_LEVEL = State()
+    ANSWERING = State()
 
 
 
 class DeleteStates(StatesGroup):
     waiting_for_word = State()
 
-CSV_PATH = "Users.csv"
-DICT_PATH = "Storage.py"
 
 running_processes = True
-
-import keyboards as kb
-# Def = DefaultBotProperties(parse_mode=ParseMode.HTML)
-
 running_processes = True
+
+
 
 class Words(StatesGroup):
     Original = State()
     Translate = State()
     Cnt = "cnt"
 
-user_timers = {}
 
 
 class Reg(StatesGroup):  #класс нужен для состояния
@@ -203,20 +205,27 @@ class TimerStates(StatesGroup):
     waiting_interval = State()
 
 
-user_attempts = {}
+DB_PATH = os.path.join(os.path.dirname(__file__), 'vocabulary_bot.db')
+COMMON_WORDS_CSV = "common_words.csv"
+CSV_PATH = "Users.csv"
+DICT_PATH = "Storage.py"
 
 
-import config
+
+
+
+
 
 bot = Bot(token=config.BOT_TOKEN)
 router = Router()
 users = {}
 
 
+user_timers = {}
+user_attempts = {}
 
 
-
-
+'''------------------------------------------------------------------------------------------------------------------------------------'''
 
 @router.message(Command("start"))
 async def start(message: Message):
@@ -234,9 +243,7 @@ async def start(message: Message):
                      "\n/check - бот выведет слова на английском (2 попытки)👇"
                      "\n/check_reverse - то же самое что и check, но выводит русские слова", parse_mode="HTML")
 
-
-
-
+'''-------------------------------------------------------------------------------------------------------------------------------------'''
 
 # @router.message(F.text == "📜 Главное меню")
 # async def main_menu_button_handler(msg: Message):
@@ -244,12 +251,11 @@ async def start(message: Message):
 #                      reply_markup=kb.main)
 
 
-
 @router.message(Command("myid"))
 async def get_my_id(message: Message):
     await message.answer(f"Ваш ID: `{message.from_user.id}`", parse_mode="Markdown")
 
-
+'''----------------------------------------------------------------------------------------------------------------------------------------'''
 
 @router.message(Command("allwords"))
 async def show_my_words(message: Message):
@@ -271,10 +277,7 @@ async def show_my_words(message: Message):
     else:
         await message.answer(response)
 
-
-
-
-
+'''-----------------------------------------------------------------------------------------------------------------------------------------'''
 
 @router.message(Command("add"))
 async def step_one(message: Message, state: FSMContext):
@@ -317,20 +320,11 @@ async def step_four(message: Message, state: FSMContext):
 
     # Добавляем слово в базу данных
     add_word(user_id, aword, user_text)
-
     await message.answer(f"<b>Добавлено слово:</b>\n{aword} - {user_text}\n\nВведите следующее английское слово:",
                          parse_mode="HTML")
     await state.set_state(Reg.Aword)
 
-
-
-
-
-
-
-
-
-
+'''-----------------------------------------------------------------------------------------------------------------------------------'''
 
 
 @router.message(Command("delete_word"))
@@ -386,13 +380,8 @@ async def process_deletion(message: Message, state: FSMContext):
             conn.close()
     await state.clear()
 
-
-
-
-
-
+#Задать следующее слово
 async def ask_next_word(msg: Message, state: FSMContext):
-    """Задать следующее слово"""
     data = await state.get_data()
     words = data['words']
 
@@ -410,13 +399,13 @@ async def ask_next_word(msg: Message, state: FSMContext):
     await msg.answer(f"🇬🇧 Слово: {aword}\nВведите перевод:")
 
 
+'''------------------------------------------------------------------------------------------------------------------------------------'''
 
 
-
-
+#Начало проверки с выбором режима (личные and общие слова)
 @router.message(Command("check"))
 async def start_check(msg: Message, state: FSMContext):
-    """Начало проверки с выбором режима"""
+
     await state.set_state(QuizStates.SELECTING_MODE)
     await msg.answer(
         "Выберите режим:",
@@ -430,9 +419,10 @@ async def start_check(msg: Message, state: FSMContext):
         )
     )
 
+
+# Обработка выбора режима
 @router.message(QuizStates.SELECTING_MODE)
 async def select_mode(msg: Message, state: FSMContext):
-    """Обработка выбора режима"""
     if msg.text == "Отмена":
         await state.clear()
         return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
@@ -461,10 +451,9 @@ async def select_mode(msg: Message, state: FSMContext):
 
     await msg.answer("Пожалуйста, выберите вариант из клавиатуры")
 
-
+# Обработка выбора уровня для общих слов
 @router.message(QuizStates.SELECTING_LEVEL)
 async def select_level(msg: Message, state: FSMContext):
-    """Обработка выбора уровня"""
     if msg.text == "Отмена":
         await state.clear()
         return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
@@ -485,9 +474,34 @@ async def select_level(msg: Message, state: FSMContext):
     await ask_next_word(msg, state)
 
 
+# Задаем следующее слово для проверки
+async def ask_next_word(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    words = data["words"]
+    mode = data["mode"]
+
+    if mode == "personal":
+        aword = random.choice(list(words.keys()))
+        rword = words[aword]
+    else:  # common
+        level = data["level"]
+        word_pair = get_random_common_word(level)
+        if not word_pair:
+            await msg.answer("Не удалось получить слово. Попробуйте еще раз.")
+            return
+        aword, rword = word_pair
+
+    await state.update_data({
+        "correct_answer": rword,
+        "current_word": aword,
+        "attempts": 0
+    })
+    await msg.answer(f"Переведите слово: {aword}")
+
+
+# Проверка ответа пользователя
 @router.message(QuizStates.ANSWERING)
 async def check_answer(msg: Message, state: FSMContext):
-    """Проверка ответа"""
     data = await state.get_data()
 
     if msg.text.lower() in ["стоп", "stop", "отмена"]:
@@ -499,96 +513,193 @@ async def check_answer(msg: Message, state: FSMContext):
 
     if user_answer == correct.lower():
         await msg.reply("✅ Верно!")
-        await state.update_data({"words": data.get("remaining_words", {})})
         return await ask_next_word(msg, state)
 
     attempts = data['attempts'] + 1
     if attempts >= 2:
         await msg.answer(f"❌ Правильно: {correct}")
-        await state.update_data({"words": data.get("remaining_words", {})})
         return await ask_next_word(msg, state)
 
     await state.update_data({"attempts": attempts})
     await msg.reply("🔄 Попробуйте еще раз")
 
 
+'''-------------------------------------------------------------------------------------------------------------------------------------------'''
+class QuizStates(StatesGroup):
+    # Состояния для обычной проверки (англ -> рус)
+    SELECTING_MODE = State()
+    SELECTING_LEVEL = State()
+    ANSWERING = State()
 
+    # Состояния для обратной проверки (рус -> англ)
+    REVERSE_SELECTING_MODE = State()
+    REVERSE_SELECTING_LEVEL = State()
+    REVERSE_ANSWERING = State()
 
-
-
-
-
+# Обработчик команды /check_reverse
 @router.message(Command("check_reverse"))
-async def random_rw(msg: Message, state: FSMContext):
-    user_id = msg.from_user.id
-    if not user_exists(user_id):
-        await msg.answer("Сначала добавьте слова с помощью команды /add")
-        return
-
-    words_dict = get_user_words(user_id)
-    if not words_dict:
-        await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
-        return
-
-    aword = random.choice(list(words_dict.keys()))
-    rword = words_dict[aword]
-
-    await state.set_state(Words.Translate)
-    await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
-    await msg.answer(rword)
-    await msg.answer("Введите английский перевод:")
+async def start_check_reverse(msg: Message, state: FSMContext):
+    await state.set_state(QuizStates.REVERSE_SELECTING_MODE)
+    await msg.answer(
+        "Выберите режим (перевод с русского на английский):",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Личные слова")],
+                [KeyboardButton(text="Общий словарь")],
+                [KeyboardButton(text="Отмена")]
+            ],
+            resize_keyboard=True
+        )
+    )
 
 
-@router.message(Words.Translate)
-async def check_english(msg: Message, state: FSMContext):
-    user_id = msg.from_user.id
-    data = await state.get_data()
-    aword = data["words"]
-    cnt = data["cnt"]
-    waiting_for_answer = data.get("waiting_for_answer", True)
-
-    if not waiting_for_answer:
-        return
-
-    user_answer = msg.text.strip().lower()
-
-    if user_answer == aword.lower():
-        await msg.reply("✅ Отличная работа!")
-        words_dict = get_user_words(user_id)
-        if not words_dict:
-            await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
-            await state.clear()
-            return
-
-        aword = random.choice(list(words_dict.keys()))
-        rword = words_dict[aword]
-        await msg.answer(rword)
-        await msg.answer("Введите английский перевод:")
-        await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
-    elif user_answer in ["стоп", "stop"]:
-        await msg.answer("<b>Вы завершили серию</b>\nВыберите нужную вам команду👇", parse_mode="HTML")
+# Обработчик выбора режима для обратной проверки
+@router.message(QuizStates.REVERSE_SELECTING_MODE)
+async def handle_reverse_mode(msg: Message, state: FSMContext):
+    if msg.text == "Отмена":
         await state.clear()
+        return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
+
+    if msg.text == "Личные слова":
+        words = get_user_words(msg.from_user.id)
+        if not words:
+            await state.clear()
+            return await msg.answer("Ваш словарь пуст. Добавьте слова через /add")
+
+        await state.set_state(QuizStates.REVERSE_ANSWERING)
+        await state.update_data({
+            "words": words,
+            "mode": "personal",
+            "level": None
+        })
+        await msg.answer("Режим: личные слова", reply_markup=ReplyKeyboardRemove())
+        return await ask_next_reverse_question(msg, state)
+
+    if msg.text == "Общий словарь":
+        await state.set_state(QuizStates.REVERSE_SELECTING_LEVEL)
+        return await msg.answer(
+            "Выберите уровень:",
+            reply_markup=get_levels_keyboard()
+        )
+
+    await msg.answer("Пожалуйста, выберите вариант из клавиатуры")
+
+
+# Обработчик выбора уровня для обратной проверки
+@router.message(QuizStates.REVERSE_SELECTING_LEVEL)
+async def handle_reverse_level(msg: Message, state: FSMContext):
+    if msg.text == "Отмена":
+        await state.clear()
+        return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
+
+    level = msg.text.replace("Уровень ", "").strip().upper()
+    words = get_common_words(level)
+
+    if not words:
+        return await msg.answer(f"Для уровня {level} пока нет слов")
+
+    await state.set_state(QuizStates.REVERSE_ANSWERING)
+    await state.update_data({
+        "words": words,
+        "mode": "common",
+        "level": level
+    })
+    await msg.answer(f"Выбран уровень: {level}", reply_markup=ReplyKeyboardRemove())
+    await ask_next_reverse_question(msg, state)
+
+
+# Функция для следующего вопроса при обратной проверке
+async def ask_next_reverse_question(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    words = data["words"]
+    mode = data["mode"]
+
+    if mode == "personal":
+        aword = random.choice(list(words.keys()))
+        rword = words[aword]
     else:
-        cnt += 1
-        if cnt >= 2:
-            await msg.answer(f"❌ Правильный перевод: <b>{aword}</b>", parse_mode="HTML")
-            time.sleep(1)
+        level = data["level"]
+        word_pair = get_random_common_word(level)
+        if not word_pair:
+            await msg.answer("Не удалось получить слово. Попробуйте еще раз.")
+            return
+        aword, rword = word_pair
 
-            words_dict = get_user_words(user_id)
-            if not words_dict:
-                await msg.answer("Ваш словарь пуст. Добавьте слова с помощью команды /add")
-                await state.clear()
-                return
+    await state.update_data({
+        "correct_answer": aword,
+        "current_rword": rword,
+        "attempts": 0
+    })
+    await msg.answer(f"Переведите на английский: {rword}")
 
-            aword = random.choice(list(words_dict.keys()))
-            rword = words_dict[aword]
-            await msg.answer(rword)
-            time.sleep(1)
-            await msg.answer("Введите английский перевод:")
-            await state.update_data(words=aword, cnt=0, waiting_for_answer=True)
-        else:
-            await msg.answer("🔄 Попробуй еще раз")
-            await state.update_data(cnt=cnt, waiting_for_answer=True)
+
+# Обработчик ответов для обратной проверки
+@router.message(QuizStates.REVERSE_ANSWERING)
+async def check_reverse_answer(msg: Message, state: FSMContext):
+    data = await state.get_data()
+
+    if msg.text.lower() in ["стоп", "stop", "отмена"]:
+        await state.clear()
+        return await msg.answer("Проверка завершена", reply_markup=ReplyKeyboardRemove())
+
+    correct = data['correct_answer'].lower()
+    user_answer = msg.text.lower()
+
+    if user_answer == correct:
+        await msg.reply("✅ Верно!")
+        return await ask_next_reverse_question(msg, state)
+
+    attempts = data['attempts'] + 1
+    if attempts >= 2:
+        await msg.answer(f"❌ Правильно: {data['correct_answer']}")
+        return await ask_next_reverse_question(msg, state)
+
+    await state.update_data({"attempts": attempts})
+    await msg.reply("🔄 Попробуйте еще раз")
+
+'''-------------------------------------------------------------------------------------------------------------------------------------'''
+
+
+
+
+
+
+
+
+# @router.message(Command("check_db"))
+# async def check_db(msg: Message):
+#     conn = sqlite3.connect(DB_PATH)
+#     cursor = conn.cursor()
+#
+#     # Проверяем количество слов для уровня C2
+#     cursor.execute("SELECT COUNT(*) FROM common_words WHERE level = 'C2'")
+#     count = cursor.fetchone()[0]
+#
+#     # Получаем примеры слов
+#     cursor.execute("SELECT english, russian FROM common_words WHERE level = 'C2' LIMIT 5")
+#     examples = cursor.fetchall()
+#
+#     conn.close()
+#
+#     await msg.answer(
+#         f"В базе данных:\n"
+#         f"Слов C2 уровня: {count}\n"
+#         f"Примеры: {examples}"
+#     )
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
