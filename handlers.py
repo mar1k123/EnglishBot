@@ -1,6 +1,8 @@
 import random
 from email.policy import default
 from symtable import Class
+from xml.sax import parse
+
 # from aiogram.client.default import DefaultBotProperties, Default
 # from aiogram.enums import ParseMode
 from aiogram import Router, Bot, F, types
@@ -270,7 +272,7 @@ async def start(message: Message):
     if not user_exists(user_id):
         add_user(user_id)
         # Для новых пользователей добавляем небольшое руководство
-        await message.answer(welcome_text)
+        await message.answer(welcome_text, parse_mode="HTML")
         await message.answer(
             "💡 <b>Совет:</b> Попробуй добавить свое первое слово командой:\n"
             "<code>/add apple - яблоко</code>\n\n"
@@ -280,8 +282,7 @@ async def start(message: Message):
     else:
         await message.answer(
             f"🎉 <b>С возвращением, {first_name}!</b>\n\n"
-            "Твой персональный словарь готов к использованию!\n\n" +
-            welcome_text.split("✨")[0] + "✨" + welcome_text.split("✨")[1],
+            "Твой персональный словарь готов к использованию!\n\n" + welcome_text,
             parse_mode="HTML"
         )
 
