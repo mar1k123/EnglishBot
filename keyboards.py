@@ -1,10 +1,16 @@
-from aiogram.types import (ReplyKeyboardMarkup,KeyboardButton,
-                           InlineKeyboardMarkup, InlineKeyboardButton) #тож самое что и Reply только Inline
+from aiogram.types import (ReplyKeyboardMarkup, KeyboardButton,
+                           InlineKeyboardMarkup, InlineKeyboardButton,
+                           ReplyKeyboardRemove)  # тож самое что и Reply только Inline
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder # Заимпортил билдер (он нужен для того, чтобы не менять знаения через код)
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import ReplyKeyboardMarkup
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import KeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import config
+from aiogram import Router, Bot, F, types
+bot = Bot(token=config.BOT_TOKEN)
+router = Router()
 
 
 
@@ -16,16 +22,38 @@ main = ReplyKeyboardMarkup(keyboard=[
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# --- Reply-клавиатура для выбора уровня ---
 def get_levels_keyboard() -> ReplyKeyboardMarkup:
-    builder = ReplyKeyboardBuilder()
-    levels = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2']
+    levels = ["Уровень A1", "Уровень A2", "Уровень B1", "Уровень B2", "Уровень C1"]
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=level)] for level in levels] + [[KeyboardButton(text="Отмена")]],
+        resize_keyboard=True
+    )
 
-    for level in levels:
-        builder.button(text=f"Уровень {level}")
+#
 
-    builder.button(text="Отмена")
-    builder.adjust(2)
-    return builder.as_markup(resize_keyboard=True)
+
+
+
+
+
+
+
+
 
 
 

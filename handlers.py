@@ -20,6 +20,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from keyboards import get_levels_keyboard
 import keyboards as kb
+from aiogram.fsm.storage.memory import MemoryStorage
 
 
 
@@ -35,6 +36,22 @@ import sys
 from database import init_common_words
 import keyboards
 import config
+
+
+router = Router()
+
+storage = MemoryStorage()
+
+from aiogram.types import CallbackQuery
+
+from aiogram import F
+from aiogram.types import CallbackQuery, Message
+from aiogram.fsm.context import FSMContext
+from config import BOT_TOKEN
+
+
+
+
 
 
 '''--------------------------------------------------------------------------------------------------------------------------------------'''
@@ -217,8 +234,8 @@ DICT_PATH = "Storage.py"
 
 
 bot = Bot(token=config.BOT_TOKEN)
-router = Router()
 users = {}
+
 
 
 user_timers = {}
@@ -230,18 +247,44 @@ user_attempts = {}
 @router.message(Command("start"))
 async def start(message: Message):
     user_id = message.from_user.id
+    first_name = message.from_user.first_name  # Получаем имя пользователя
+
+    welcome_text = (
+        f"👋 <b>Привет, {first_name}!</b>\n\n"
+        "Я - твой помощник в изучении английских слов! 📚\n"
+        "Я буду хранить твой персональный словарь и помогать тебе его запоминать.\n\n"
+        "✨ <b>Что я умею:</b>\n"
+        "• Добавлять новые слова и переводы\n"
+        "• Показывать все твои слова\n"
+        "• Проверять твои знания в двух режимах\n"
+        "• Удалять слова, которые ты уже выучил\n\n"
+        "📌 <b>Доступные команды:</b>\n"
+        "/add - Добавить новое слово + перевод\n"
+        "/delete_word - Удалить слово из словаря\n"
+        "/allwords - Показать все слова\n"
+        "/check - Проверка знаний (английский → русский)\n"
+        "/check_reverse - Проверка знаний (русский → английский)\n\n"
+        "Начни с команды /add чтобы добавить первое слово!"
+    )
 
     if not user_exists(user_id):
         add_user(user_id)
-        await message.answer("Привет! Я бот для изучения слов. Я создам для вас персональный словарь.")
+        # Для новых пользователей добавляем небольшое руководство
+        await message.answer(welcome_text)
+        await message.answer(
+            "💡 <b>Совет:</b> Попробуй добавить свое первое слово командой:\n"
+            "<code>/add apple - яблоко</code>\n\n"
+            "Или просто отправь <code>/add</code> и я помогу тебе добавить слово!",
+            parse_mode="HTML"
+        )
     else:
-        await message.answer("С возвращением! Ваш персональный словарь готов к использованию.")
-    await message.answer("\n<b>Доступные команды</b>:"
-                     "\n/add - добавить английское слово в список и его перевод"
-                     "\n/delete_word - удалить слово из словаря"
-                     "\n/allwords - посмотреть все записанные слова"
-                     "\n/check - бот выведет слова на английском (2 попытки)👇"
-                     "\n/check_reverse - то же самое что и check, но выводит русские слова", parse_mode="HTML")
+        await message.answer(
+            f"🎉 <b>С возвращением, {first_name}!</b>\n\n"
+            "Твой персональный словарь готов к использованию!\n\n" +
+            welcome_text.split("✨")[0] + "✨" + welcome_text.split("✨")[1],
+            parse_mode="HTML"
+        )
+
 
 '''-------------------------------------------------------------------------------------------------------------------------------------'''
 
@@ -279,49 +322,75 @@ async def show_my_words(message: Message):
 
 '''-----------------------------------------------------------------------------------------------------------------------------------------'''
 
+
 @router.message(Command("add"))
 async def step_one(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    first_name = message.from_user.first_name
+
     if not user_exists(user_id):
         add_user(user_id)
 
     await state.set_state(Reg.Aword)
-    await message.answer("Привет, введи английское слово:\n"
-                         "<i>Ты всегда можешь прекратить ввод слов, вписав в чат <b>'Стоп'</b> или <b>'Stop'</b></i>",
-                         parse_mode="HTML")
+    await message.answer(
+        f"🌟 <b>{first_name}, давайте добавим новое слово!</b>\n\n"
+        "📝 <i>Введите английское слово:</i>\n\n"
+        "▫️ Для отмены напишите <code>стоп</code> или <code>stop</code>",
+        parse_mode="HTML"
+    )
 
 
 @router.message(Reg.Aword)
 async def step_two(message: Message, state: FSMContext):
     user_text = message.text.strip()
     user_id = message.from_user.id
+    first_name = message.from_user.first_name
 
     if user_text.lower() in ["стоп", "stop"]:
-        await message.answer("Вы приостановили ввод слов\nВыберите нужную вам команду👇")
+        await message.answer(
+            "⏸ <b>Ввод приостановлен</b>\n\n"
+            "Вы можете продолжить добавление слов командой /add",
+            parse_mode="HTML"
+        )
         await state.clear()
         return
 
     await state.update_data(aword=user_text)
     await state.set_state(Reg.Rword)
-    await message.answer("Введите перевод:")
+    await message.answer(
+        f"🔄 <b>{first_name}, теперь введите перевод для слова:</b>\n"
+        f"<code>{user_text}</code>\n\n"
+        "📌 Можно ввести несколько вариантов перевода через запятую",
+        parse_mode="HTML"
+    )
 
 
 @router.message(Reg.Rword)
 async def step_four(message: Message, state: FSMContext):
     user_text = message.text.strip()
     user_id = message.from_user.id
+    first_name = message.from_user.first_name
     data = await state.get_data()
     aword = data.get('aword', '')
 
     if user_text.lower() in ["стоп", "stop"]:
-        await message.answer("Вы приостановили ввод слов\nВыберите нужную вам команду👇")
+        await message.answer(
+            "⏸ <b>Ввод приостановлен</b>\n\n"
+            "Вы можете продолжить добавление слов командой /add",
+            parse_mode="HTML"
+        )
         await state.clear()
         return
 
     # Добавляем слово в базу данных
     add_word(user_id, aword, user_text)
-    await message.answer(f"<b>Добавлено слово:</b>\n{aword} - {user_text}\n\nВведите следующее английское слово:",
-                         parse_mode="HTML")
+    await message.answer(
+        f"✅ <b>Слово успешно добавлено!</b>\n\n"
+        f"<b>Английский:</b> <code>{aword}</code>\n"
+        f"<b>Русский:</b> <code>{user_text}</code>\n\n"
+        f"🌟 <i>{first_name}, можете ввести следующее английское слово или написать 'стоп' для завершения</i>",
+        parse_mode="HTML"
+    )
     await state.set_state(Reg.Aword)
 
 '''-----------------------------------------------------------------------------------------------------------------------------------'''
@@ -330,18 +399,34 @@ async def step_four(message: Message, state: FSMContext):
 @router.message(Command("delete_word"))
 async def delete_word_handler(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    first_name = message.from_user.first_name
+
     if not user_exists(user_id):
-        await message.answer("❌ Ваш словарь пуст. Используйте /add")
+        await message.answer(
+            f"📭 <b>{first_name}, ваш словарь пуст!</b>\n\n"
+            "Добавьте слова командой /add чтобы начать обучение",
+            parse_mode="HTML"
+        )
         return
 
     await state.set_state(DeleteStates.waiting_for_word)
-    await message.answer("📝 Введите английское слово для удаления:")
+    await message.answer(
+        f"🗑 <b>{first_name}, введите слово для удаления:</b>\n\n"
+        "• Для отмены напишите <code>стоп</code>",
+        parse_mode="HTML"
+    )
 
 
 @router.message(DeleteStates.waiting_for_word)
 async def process_deletion(message: Message, state: FSMContext):
     user_id = message.from_user.id
+    first_name = message.from_user.first_name
     word = message.text.strip()
+
+    if word.lower() in ["стоп", "stop"]:
+        await message.answer("❌ Удаление отменено")
+        await state.clear()
+        return
 
     conn = None
     try:
@@ -355,8 +440,13 @@ async def process_deletion(message: Message, state: FSMContext):
             WHERE user_id = ? AND LOWER(aword) = LOWER(?)
         """, (user_id, word))
 
-        if cursor.fetchone()[0] == 0:
-            await message.answer(f"❌ Слово '{word}' не найдено")
+        count = cursor.fetchone()[0]
+        if count == 0:
+            await message.answer(
+                f"🔍 <b>Слово '{word}' не найдено!</b>\n\n"
+                "Проверьте правильность написания или посмотрите все слова командой /allwords",
+                parse_mode="HTML"
+            )
             return
 
         # Удаление
@@ -366,72 +456,66 @@ async def process_deletion(message: Message, state: FSMContext):
         """, (user_id, word))
         conn.commit()
 
-        await message.answer(f"✅ Слово '{word}' удалено!")
+        await message.answer(
+            f"✅ <b>Успешно удалено!</b>\n\n"
+            f"Слово <code>{word}</code> больше не в вашем словаре\n\n"
+            f"Можете удалить ещё слова или ввести <code>стоп</code>",
+            parse_mode="HTML"
+        )
 
     except sqlite3.OperationalError as e:
-        if "locked" in str(e):
-            await message.answer("🔒 База временно заблокирована. Попробуйте через 5 секунд")
-        else:
-            await message.answer(f"⚠️ Ошибка базы: {str(e)}")
+        error_msg = "🔒 База временно заблокирована. Попробуйте через 5 секунд" if "locked" in str(
+            e) else f"⚠️ Ошибка базы: {str(e)}"
+        await message.answer(error_msg)
     except Exception as e:
-        await message.answer(f"⚠️ Ошибка: {str(e)}")
+        await message.answer(f"⚠️ Неожиданная ошибка: {str(e)}")
     finally:
         if conn:
             conn.close()
-    await state.clear()
-
-#Задать следующее слово
-async def ask_next_word(msg: Message, state: FSMContext):
-    data = await state.get_data()
-    words = data['words']
-
-    if not words:
-        await state.clear()
-        return await msg.answer("Слова закончились!", reply_markup=ReplyKeyboardRemove())
-
-    aword = random.choice(list(words.keys()))
-    await state.update_data({
-        "current_word": aword,
-        "attempts": 0,
-        "correct_answer": words[aword],
-        "remaining_words": {k: v for k, v in words.items() if k != aword}
-    })
-    await msg.answer(f"🇬🇧 Слово: {aword}\nВведите перевод:")
 
 
 '''------------------------------------------------------------------------------------------------------------------------------------'''
 
 
-#Начало проверки с выбором режима (личные and общие слова)
+# Начало проверки с выбором режима
 @router.message(Command("check"))
 async def start_check(msg: Message, state: FSMContext):
-
     await state.set_state(QuizStates.SELECTING_MODE)
     await msg.answer(
-        "Выберите режим:",
+        "📚 <b>Выберите режим проверки:</b>",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Личные слова")],
-                [KeyboardButton(text="Общий словарь")],
-                [KeyboardButton(text="Отмена")]
+                [KeyboardButton(text="🔒 Личные слова")],
+                [KeyboardButton(text="🌍 Общий словарь")],
+                [KeyboardButton(text="❌ Отмена")]
             ],
-            resize_keyboard=True
-        )
+            resize_keyboard=True,
+            one_time_keyboard=True
+        ),
+        parse_mode="HTML"
     )
 
 
 # Обработка выбора режима
 @router.message(QuizStates.SELECTING_MODE)
 async def select_mode(msg: Message, state: FSMContext):
-    if msg.text == "Отмена":
+    if msg.text == "❌ Отмена":
         await state.clear()
-        return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
+        return await msg.answer(
+            "🚫 Проверка отменена",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
-    if msg.text == "Личные слова":
+    if msg.text == "🔒 Личные слова":
         words = get_user_words(msg.from_user.id)
         if not words:
             await state.clear()
-            return await msg.answer("Ваш словарь пуст. Добавьте слова через /add")
+            return await msg.answer(
+                "📭 <b>Ваш словарь пуст</b>\n\n"
+                "Добавьте слова через команду /add",
+                parse_mode="HTML",
+                reply_markup=ReplyKeyboardRemove()
+            )
 
         await state.set_state(QuizStates.ANSWERING)
         await state.update_data({
@@ -439,30 +523,53 @@ async def select_mode(msg: Message, state: FSMContext):
             "mode": "personal",
             "level": None
         })
-        await msg.answer("Режим: личные слова", reply_markup=ReplyKeyboardRemove())
+        await msg.answer(
+            "🔐 <b>Режим: Личные слова</b>\n\n"
+            "У вас будет 2 попытки для каждого слова",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return await ask_next_word(msg, state)
 
-    if msg.text == "Общий словарь":
+    if msg.text == "🌍 Общий словарь":
         await state.set_state(QuizStates.SELECTING_LEVEL)
         return await msg.answer(
-            "Выберите уровень:",
-            reply_markup=get_levels_keyboard()
+            "📊 <b>Выберите уровень сложности:</b>",
+            reply_markup=get_levels_keyboard(),
+            parse_mode="HTML"
         )
 
-    await msg.answer("Пожалуйста, выберите вариант из клавиатуры")
+    await msg.answer(
+        "⚠️ Пожалуйста, выберите вариант из предложенных",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🔒 Личные слова")],
+                [KeyboardButton(text="🌍 Общий словарь")],
+                [KeyboardButton(text="❌ Отмена")]
+            ],
+            resize_keyboard=True
+        )
+    )
+
 
 # Обработка выбора уровня для общих слов
 @router.message(QuizStates.SELECTING_LEVEL)
 async def select_level(msg: Message, state: FSMContext):
-    if msg.text == "Отмена":
+    if msg.text == "❌ Отмена":
         await state.clear()
-        return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
+        return await msg.answer(
+            "🚫 Проверка отменена",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
     level = msg.text.replace("Уровень ", "").strip().upper()
     words = get_common_words(level)
 
     if not words:
-        return await msg.answer(f"Для уровня {level} пока нет слов")
+        return await msg.answer(
+            f"⚠️ Для уровня {level} пока нет слов",
+            reply_markup=get_levels_keyboard()
+        )
 
     await state.set_state(QuizStates.ANSWERING)
     await state.update_data({
@@ -470,7 +577,12 @@ async def select_level(msg: Message, state: FSMContext):
         "mode": "common",
         "level": level
     })
-    await msg.answer(f"Выбран уровень: {level}", reply_markup=ReplyKeyboardRemove())
+    await msg.answer(
+        f"📈 <b>Выбран уровень:</b> {level}\n\n"
+        "У вас будет 2 попытки для каждого слова",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove()
+    )
     await ask_next_word(msg, state)
 
 
@@ -487,7 +599,7 @@ async def ask_next_word(msg: Message, state: FSMContext):
         level = data["level"]
         word_pair = get_random_common_word(level)
         if not word_pair:
-            await msg.answer("Не удалось получить слово. Попробуйте еще раз.")
+            await msg.answer("⚠️ Не удалось получить слово. Попробуйте еще раз.")
             return
         aword, rword = word_pair
 
@@ -496,7 +608,10 @@ async def ask_next_word(msg: Message, state: FSMContext):
         "current_word": aword,
         "attempts": 0
     })
-    await msg.answer(f"Переведите слово: {aword}")
+    await msg.answer(
+        f"🇬🇧 <b>Переведите слово:</b>\n<code>{aword}</code>",
+        parse_mode="HTML"
+    )
 
 
 # Проверка ответа пользователя
@@ -504,24 +619,31 @@ async def ask_next_word(msg: Message, state: FSMContext):
 async def check_answer(msg: Message, state: FSMContext):
     data = await state.get_data()
 
-    if msg.text.lower() in ["стоп", "stop", "отмена"]:
+    if msg.text.lower() in ["стоп", "stop", "отмена", "❌"]:
         await state.clear()
-        return await msg.answer("Проверка завершена", reply_markup=ReplyKeyboardRemove())
+        return await msg.answer(
+            "🏁 <b>Проверка завершена</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
     correct = data['correct_answer']
     user_answer = msg.text.lower()
 
     if user_answer == correct.lower():
-        await msg.reply("✅ Верно!")
+        await msg.reply("✅ <b>Верно!</b>", parse_mode="HTML")
         return await ask_next_word(msg, state)
 
     attempts = data['attempts'] + 1
     if attempts >= 2:
-        await msg.answer(f"❌ Правильно: {correct}")
+        await msg.reply(
+            f"❌ <b>Правильный ответ:</b>\n<code>{correct}</code>",
+            parse_mode="HTML"
+        )
         return await ask_next_word(msg, state)
 
     await state.update_data({"attempts": attempts})
-    await msg.reply("🔄 Попробуйте еще раз")
+    await msg.reply("🔄 <b>Попробуйте еще раз</b>", parse_mode="HTML")
 
 
 '''-------------------------------------------------------------------------------------------------------------------------------------------'''
@@ -541,30 +663,42 @@ class QuizStates(StatesGroup):
 async def start_check_reverse(msg: Message, state: FSMContext):
     await state.set_state(QuizStates.REVERSE_SELECTING_MODE)
     await msg.answer(
-        "Выберите режим (перевод с русского на английский):",
+        "🔁 <b>Режим обратной проверки</b>\n\n"
+        "<i>Перевод с русского на английский</i>\n\n"
+        "Выберите источник слов:",
         reply_markup=ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Личные слова")],
-                [KeyboardButton(text="Общий словарь")],
-                [KeyboardButton(text="Отмена")]
+                [KeyboardButton(text="🔒 Личные слова")],
+                [KeyboardButton(text="🌍 Общий словарь")],
+                [KeyboardButton(text="❌ Отмена")]
             ],
-            resize_keyboard=True
-        )
+            resize_keyboard=True,
+            one_time_keyboard=True
+        ),
+        parse_mode="HTML"
     )
 
 
-# Обработчик выбора режима для обратной проверки
 @router.message(QuizStates.REVERSE_SELECTING_MODE)
 async def handle_reverse_mode(msg: Message, state: FSMContext):
-    if msg.text == "Отмена":
+    if msg.text == "❌ Отмена":
         await state.clear()
-        return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
+        return await msg.answer(
+            "🚫 Проверка отменена",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="HTML"
+        )
 
-    if msg.text == "Личные слова":
+    if msg.text == "🔒 Личные слова":
         words = get_user_words(msg.from_user.id)
         if not words:
             await state.clear()
-            return await msg.answer("Ваш словарь пуст. Добавьте слова через /add")
+            return await msg.answer(
+                "📭 <b>Ваш словарь пуст</b>\n\n"
+                "Добавьте слова через команду /add",
+                parse_mode="HTML",
+                reply_markup=ReplyKeyboardRemove()
+            )
 
         await state.set_state(QuizStates.REVERSE_ANSWERING)
         await state.update_data({
@@ -572,31 +706,54 @@ async def handle_reverse_mode(msg: Message, state: FSMContext):
             "mode": "personal",
             "level": None
         })
-        await msg.answer("Режим: личные слова", reply_markup=ReplyKeyboardRemove())
+        await msg.answer(
+            "🔐 <b>Режим: Личные слова</b>\n\n"
+            "У вас будет 2 попытки для каждого слова",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
         return await ask_next_reverse_question(msg, state)
 
-    if msg.text == "Общий словарь":
+    if msg.text == "🌍 Общий словарь":
         await state.set_state(QuizStates.REVERSE_SELECTING_LEVEL)
         return await msg.answer(
-            "Выберите уровень:",
-            reply_markup=get_levels_keyboard()
+            "📊 <b>Выберите уровень сложности:</b>",
+            reply_markup=get_levels_keyboard(),
+            parse_mode="HTML"
         )
 
-    await msg.answer("Пожалуйста, выберите вариант из клавиатуры")
+    await msg.answer(
+        "⚠️ Пожалуйста, выберите вариант из предложенных",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🔒 Личные слова")],
+                [KeyboardButton(text="🌍 Общий словарь")],
+                [KeyboardButton(text="❌ Отмена")]
+            ],
+            resize_keyboard=True
+        )
+    )
 
 
-# Обработчик выбора уровня для обратной проверки
 @router.message(QuizStates.REVERSE_SELECTING_LEVEL)
 async def handle_reverse_level(msg: Message, state: FSMContext):
-    if msg.text == "Отмена":
+    if msg.text == "❌ Отмена":
         await state.clear()
-        return await msg.answer("Отменено", reply_markup=ReplyKeyboardRemove())
+        return await msg.answer(
+            "🚫 Проверка отменена",
+            reply_markup=ReplyKeyboardRemove(),
+            parse_mode="HTML"
+        )
 
     level = msg.text.replace("Уровень ", "").strip().upper()
     words = get_common_words(level)
 
     if not words:
-        return await msg.answer(f"Для уровня {level} пока нет слов")
+        return await msg.answer(
+            f"⚠️ Для уровня {level} пока нет слов",
+            reply_markup=get_levels_keyboard(),
+            parse_mode="HTML"
+        )
 
     await state.set_state(QuizStates.REVERSE_ANSWERING)
     await state.update_data({
@@ -604,11 +761,15 @@ async def handle_reverse_level(msg: Message, state: FSMContext):
         "mode": "common",
         "level": level
     })
-    await msg.answer(f"Выбран уровень: {level}", reply_markup=ReplyKeyboardRemove())
+    await msg.answer(
+        f"📈 <b>Выбран уровень:</b> {level}\n\n"
+        "У вас будет 2 попытки для каждого слова",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove()
+    )
     await ask_next_reverse_question(msg, state)
 
 
-# Функция для следующего вопроса при обратной проверке
 async def ask_next_reverse_question(msg: Message, state: FSMContext):
     data = await state.get_data()
     words = data["words"]
@@ -621,7 +782,10 @@ async def ask_next_reverse_question(msg: Message, state: FSMContext):
         level = data["level"]
         word_pair = get_random_common_word(level)
         if not word_pair:
-            await msg.answer("Не удалось получить слово. Попробуйте еще раз.")
+            await msg.answer(
+                "⚠️ Не удалось получить слово. Попробуйте еще раз.",
+                parse_mode="HTML"
+            )
             return
         aword, rword = word_pair
 
@@ -630,32 +794,41 @@ async def ask_next_reverse_question(msg: Message, state: FSMContext):
         "current_rword": rword,
         "attempts": 0
     })
-    await msg.answer(f"Переведите на английский: {rword}")
+    await msg.answer(
+        f"🇷🇺 <b>Переведите на английский:</b>\n<code>{rword}</code>",
+        parse_mode="HTML"
+    )
 
 
-# Обработчик ответов для обратной проверки
 @router.message(QuizStates.REVERSE_ANSWERING)
 async def check_reverse_answer(msg: Message, state: FSMContext):
     data = await state.get_data()
 
-    if msg.text.lower() in ["стоп", "stop", "отмена"]:
+    if msg.text.lower() in ["стоп", "stop", "отмена", "❌"]:
         await state.clear()
-        return await msg.answer("Проверка завершена", reply_markup=ReplyKeyboardRemove())
+        return await msg.answer(
+            "🏁 <b>Проверка завершена</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove()
+        )
 
     correct = data['correct_answer'].lower()
     user_answer = msg.text.lower()
 
     if user_answer == correct:
-        await msg.reply("✅ Верно!")
+        await msg.reply("✅ <b>Верно!</b>", parse_mode="HTML")
         return await ask_next_reverse_question(msg, state)
 
     attempts = data['attempts'] + 1
     if attempts >= 2:
-        await msg.answer(f"❌ Правильно: {data['correct_answer']}")
+        await msg.reply(
+            f"❌ <b>Правильный ответ:</b>\n<code>{data['correct_answer']}</code>",
+            parse_mode="HTML"
+        )
         return await ask_next_reverse_question(msg, state)
 
     await state.update_data({"attempts": attempts})
-    await msg.reply("🔄 Попробуйте еще раз")
+    await msg.reply("🔄 <b>Попробуйте еще раз</b>", parse_mode="HTML")
 
 '''-------------------------------------------------------------------------------------------------------------------------------------'''
 
@@ -663,47 +836,7 @@ async def check_reverse_answer(msg: Message, state: FSMContext):
 
 
 
-
-
-
-# @router.message(Command("check_db"))
-# async def check_db(msg: Message):
-#     conn = sqlite3.connect(DB_PATH)
-#     cursor = conn.cursor()
-#
-#     # Проверяем количество слов для уровня C2
-#     cursor.execute("SELECT COUNT(*) FROM common_words WHERE level = 'C2'")
-#     count = cursor.fetchone()[0]
-#
-#     # Получаем примеры слов
-#     cursor.execute("SELECT english, russian FROM common_words WHERE level = 'C2' LIMIT 5")
-#     examples = cursor.fetchall()
-#
-#     conn.close()
-#
-#     await msg.answer(
-#         f"В базе данных:\n"
-#         f"Слов C2 уровня: {count}\n"
-#         f"Примеры: {examples}"
-#     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 @router.message()
 async def noCommands_handler(msg: Message):
-    await msg.reply("Такой команды нету")
+    await msg.reply("Такой команды нет\n"
+                    "Нажмте <b> Меню </b>, чтобы выбрать команду", parse_mode="HTML")
