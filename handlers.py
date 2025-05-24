@@ -841,3 +841,13 @@ async def check_reverse_answer(msg: Message, state: FSMContext):
 async def noCommands_handler(msg: Message):
     await msg.reply("Такой команды нет\n"
                     "Нажмте <b> Меню </b>, чтобы выбрать команду", parse_mode="HTML")
+
+
+
+
+
+
+
+
+
+##################
