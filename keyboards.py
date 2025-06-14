@@ -27,7 +27,15 @@ main = ReplyKeyboardMarkup(keyboard=[
 
 
 
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
+stop_rkb = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Стоп")]  # Или "Stop" если предпочитаете
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
 
 
 
