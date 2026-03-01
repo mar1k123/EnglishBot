@@ -1,6 +1,7 @@
-﻿# EnglishBot
+﻿# [EnglishBot](https://t.me/nlishBotLearningBot)
 
 Telegram-бот для изучения английских слов на `Aiogram 3` с личным словарем, тренировками, напоминаниями и системой прогресса.
+
 
 ## Основные возможности
 
@@ -85,3 +86,7 @@ Telegram-бот для изучения английских слов на `Aiog
 - Используется `SQLite` (локальная БД в корне проекта).
 - Контекстные примеры берутся из API словаря с fallback-шаблонами.
 - Для проекта настроен `.gitignore` для локальных артефактов (`.venv`, `*.db`, `__pycache__`, временные файлы).
+## 📬 Contact me
+
+- Telegram: [Guzzlik](https://t.me/Guzzlik)
+- Email: markbaltachi@gmail.com
