@@ -3,6 +3,7 @@ import sys
 import os
 from pathlib import Path
 import csv
+import time
 DB_PATH = os.path.join(os.path.dirname(__file__), 'vocabulary_bot.db')
 COMMON_WORDS_CSV = "common_words.csv"
 
@@ -468,7 +469,261 @@ def init_common_words():
 init_common_words()
 
 
+def ensure_stats_tables():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
 
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS user_stats (
+            user_id INTEGER PRIMARY KEY,
+            total_correct INTEGER NOT NULL DEFAULT 0,
+            total_wrong INTEGER NOT NULL DEFAULT 0,
+            learned_words INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS word_stats (
+            user_id INTEGER NOT NULL,
+            aword TEXT NOT NULL,
+            correct_count INTEGER NOT NULL DEFAULT 0,
+            wrong_count INTEGER NOT NULL DEFAULT 0,
+            is_learned INTEGER NOT NULL DEFAULT 0,
+            is_hard INTEGER NOT NULL DEFAULT 0,
+            hard_correct_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, aword)
+        )
+    """)
+
+    cursor.execute("PRAGMA table_info(word_stats)")
+    word_stats_columns = {row[1] for row in cursor.fetchall()}
+    if "is_hard" not in word_stats_columns:
+        cursor.execute("ALTER TABLE word_stats ADD COLUMN is_hard INTEGER NOT NULL DEFAULT 0")
+    if "hard_correct_count" not in word_stats_columns:
+        cursor.execute("ALTER TABLE word_stats ADD COLUMN hard_correct_count INTEGER NOT NULL DEFAULT 0")
+    if "srs_stage" not in word_stats_columns:
+        cursor.execute("ALTER TABLE word_stats ADD COLUMN srs_stage INTEGER NOT NULL DEFAULT 0")
+    if "next_review_at" not in word_stats_columns:
+        cursor.execute("ALTER TABLE word_stats ADD COLUMN next_review_at INTEGER NOT NULL DEFAULT 0")
+    if "last_review_at" not in word_stats_columns:
+        cursor.execute("ALTER TABLE word_stats ADD COLUMN last_review_at INTEGER NOT NULL DEFAULT 0")
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS error_history (
+            user_id INTEGER NOT NULL,
+            aword TEXT NOT NULL,
+            error_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (user_id, aword)
+        )
+    """)
+
+    conn.commit()
+    conn.close()
+
+
+ensure_stats_tables()
+
+
+
+def init_user_stats(user_id: int):
+    ensure_stats_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT OR IGNORE INTO user_stats (user_id)
+        VALUES (?)
+    """, (user_id,))
+    conn.commit()
+    conn.close()
+
+
+
+# обновление статистики словаря пользователя
+def update_word_stats(user_id: int, aword: str, correct: bool):
+    ensure_stats_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    hard_removed = False
+
+    cursor.execute("""
+        INSERT OR IGNORE INTO word_stats (user_id, aword)
+        VALUES (?, ?)
+    """, (user_id, aword))
+
+    cursor.execute("""
+        SELECT srs_stage
+        FROM word_stats
+        WHERE user_id = ? AND aword = ?
+    """, (user_id, aword))
+    row = cursor.fetchone()
+    srs_stage = int(row[0]) if row else 0
+    now_ts = int(time.time())
+    # 0:10m, 1:1h, 2:6h, 3:1d, 4:3d, 5:7d, 6:14d
+    srs_intervals = [600, 3600, 21600, 86400, 259200, 604800, 1209600]
+
+    if correct:
+        cursor.execute("""
+            UPDATE word_stats
+            SET correct_count = correct_count + 1
+            WHERE user_id = ? AND aword = ?
+        """, (user_id, aword))
+
+        cursor.execute("""
+            UPDATE word_stats
+            SET hard_correct_count = hard_correct_count + 1
+            WHERE user_id = ? AND aword = ? AND is_hard = 1
+        """, (user_id, aword))
+
+        cursor.execute("""
+            UPDATE user_stats
+            SET total_correct = total_correct + 1
+            WHERE user_id = ?
+        """, (user_id,))
+
+        cursor.execute("""
+            SELECT is_hard, hard_correct_count
+            FROM word_stats
+            WHERE user_id = ? AND aword = ?
+        """, (user_id, aword))
+        row = cursor.fetchone()
+        if row and row[0] == 1 and row[1] >= 10:
+            cursor.execute("""
+                UPDATE word_stats
+                SET is_hard = 0, hard_correct_count = 0
+                WHERE user_id = ? AND aword = ?
+            """, (user_id, aword))
+            hard_removed = True
+
+        new_stage = min(srs_stage + 1, len(srs_intervals) - 1)
+        next_review_at = now_ts + srs_intervals[new_stage]
+        cursor.execute("""
+            UPDATE word_stats
+            SET srs_stage = ?, next_review_at = ?, last_review_at = ?
+            WHERE user_id = ? AND aword = ?
+        """, (new_stage, next_review_at, now_ts, user_id, aword))
+    else:
+        cursor.execute("""
+            UPDATE word_stats
+            SET wrong_count = wrong_count + 1
+            WHERE user_id = ? AND aword = ?
+        """, (user_id, aword))
+
+        cursor.execute("""
+            UPDATE user_stats
+            SET total_wrong = total_wrong + 1
+            WHERE user_id = ?
+        """, (user_id,))
+
+        cursor.execute("""
+            INSERT INTO error_history (user_id, aword, error_count)
+            VALUES (?, ?, 1)
+            ON CONFLICT(user_id, aword)
+            DO UPDATE SET error_count = error_count + 1
+        """, (user_id, aword))
+
+        cursor.execute("""
+            UPDATE word_stats
+            SET is_hard = 1
+            WHERE user_id = ? AND aword = ?
+        """, (user_id, aword))
+
+        new_stage = max(srs_stage - 1, 0)
+        # After error, schedule an early review.
+        next_review_at = now_ts + 300
+        cursor.execute("""
+            UPDATE word_stats
+            SET srs_stage = ?, next_review_at = ?, last_review_at = ?
+            WHERE user_id = ? AND aword = ?
+        """, (new_stage, next_review_at, now_ts, user_id, aword))
+
+    cursor.execute("""
+        UPDATE word_stats
+        SET is_learned = 1
+        WHERE user_id = ? AND aword = ? AND correct_count >= 10
+    """, (user_id, aword))
+
+    cursor.execute("""
+        UPDATE user_stats
+        SET learned_words = (
+            SELECT COUNT(*) FROM word_stats
+            WHERE user_id = ? AND is_learned = 1
+        )
+        WHERE user_id = ?
+    """, (user_id, user_id))
+
+    conn.commit()
+    conn.close()
+    return {"hard_removed": hard_removed, "word": aword}
+
+
+def pick_srs_word(user_id: int, candidates: list[str]) -> str | None:
+    if not candidates:
+        return None
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    placeholders = ",".join("?" for _ in candidates)
+    params = [user_id, *candidates]
+    cursor.execute(
+        f"""
+        SELECT aword, next_review_at
+        FROM word_stats
+        WHERE user_id = ?
+          AND aword IN ({placeholders})
+        """,
+        params,
+    )
+    rows = cursor.fetchall()
+    conn.close()
+
+    next_map = {word: 0 for word in candidates}
+    for aword, next_review_at in rows:
+        next_map[aword] = int(next_review_at or 0)
+
+    now_ts = int(time.time())
+    due = [w for w in candidates if next_map.get(w, 0) <= now_ts]
+    pool = due if due else candidates
+
+    min_next = min(next_map.get(w, 0) for w in pool)
+    prioritized = [w for w in pool if next_map.get(w, 0) == min_next]
+    return sorted(prioritized)[0] if prioritized else None
+
+
+
+
+# сложные слова
+def get_hard_words(user_id: int, limit: int = 10):
+    ensure_stats_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT aword FROM word_stats
+        WHERE user_id = ? AND is_hard = 1
+        ORDER BY wrong_count DESC, aword ASC
+        LIMIT ?
+    """, (user_id, limit))
+    words = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    return words
+
+
+# уровень пользователя
+def get_user_level(user_id: int) -> int:
+    ensure_stats_tables()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT learned_words FROM user_stats WHERE user_id = ?
+    """, (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    learned = row[0] if row else 0
+
+    if learned >= 1000: return 5
+    if learned >= 500: return 4
+    if learned >= 200: return 3
+    if learned >= 100: return 2
+    return 1
 
 ##########
 

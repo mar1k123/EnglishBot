@@ -1,240 +1,63 @@
+﻿import asyncio
+import html
 import random
-from email.policy import default
-from symtable import Class
-from xml.sax import parse
-
-# from aiogram.client.default import DefaultBotProperties, Default
-# from aiogram.enums import ParseMode
-from aiogram import Router, Bot, F, types
-from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, User, Chat, Update
-from pyexpat.errors import messages
-from aiogram.fsm.state import StatesGroup, State, default_state
-from aiogram.fsm.context import FSMContext# нужен для управления состояниями
-from aiogram.fsm.state import StatesGroup, State
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple
-from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
-from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram import Router
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import Message, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
-from keyboards import get_levels_keyboard
-import keyboards as kb
-from keyboards import stop_rkb
-from aiogram.fsm.storage.memory import MemoryStorage
-
-
-
-# from html import escape
-import asyncio
-from datetime import datetime
-from typing import Callable
-import time
-import csv
-import os
-import sqlite3
-import sys
-from database import init_common_words
-import keyboards
-import config
 import re
+import sqlite3
+import time
+import requests
+
+from aiogram import Bot, F, Router
+from aiogram.filters import Command, StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import (
+    CallbackQuery,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+)
+
+import config
+from database import (
+    get_hard_words,
+    pick_srs_word,
+    get_user_level,
+    init_user_stats,
+    update_word_stats,
+)
+from keyboards import get_levels_keyboard, stop_rkb
+from services.common_words import get_common_words
+from services.paths import DB_PATH
+from services.user_words import (
+    add_user,
+    add_word,
+    get_random_aword,
+    get_rword_by_aword,
+    get_user_words,
+    user_exists,
+)
 
 
 router = Router()
-
-storage = MemoryStorage()
-
-from aiogram.types import CallbackQuery
-
-from aiogram import F
-from aiogram.types import CallbackQuery, Message
-from aiogram.fsm.context import FSMContext
-from config import BOT_TOKEN
-
-
-
-
+STOP_BUTTON_TEXT = "\u0421\u0442\u043e\u043f"
+STOP_WORDS = {"stop", "\u0441\u0442\u043e\u043f"}
 
 
 '''--------------------------------------------------------------------------------------------------------------------------------------'''
-#SQLite functions
-def user_exists(user_id: int) -> bool:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
-    exists = cursor.fetchone() is not None
-    conn.close()
-    return exists
-
-
-# Добавляет нового пользователя
-def add_user(user_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('INSERT OR IGNORE INTO users (user_id) VALUES (?)', (user_id,))
-    conn.commit()
-    conn.close()
-
-
-# Добавляет слово в словарь пользователя
-def add_word(user_id: int, aword: str, rword: str):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        'INSERT INTO words (user_id, aword, rword) VALUES (?, ?, ?)',
-        (user_id, aword, rword)
-    )
-    conn.commit()
-    conn.close()
-
-
-# Получить личные слова пользователя
-def get_user_words(user_id: int) -> Dict[str, str]:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT aword, rword FROM words WHERE user_id = ?", (user_id,))
-    rows = cursor.fetchall()
-    conn.close()
-    return {aword: rword for aword, rword in rows} if rows else {}
-
-
-# Получает случайное английское слово пользователя
-# Глобальный словарь для отслеживания использованных слов пользователя
-used_user_words = {}
-
-
-def get_random_aword(user_id: int) -> Optional[str]:
-    # Инициализируем множество для этого пользователя, если еще не было
-    if user_id not in used_user_words:
-        used_user_words[user_id] = set()
-
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Получаем все слова пользователя, которые еще не использовались
-    cursor.execute('''
-        SELECT aword FROM words 
-        WHERE user_id = ? AND aword NOT IN ({})
-    '''.format(','.join(['?'] * len(used_user_words[user_id]))),
-                   (user_id, *used_user_words[user_id]))
-
-    available_words = cursor.fetchall()
-
-    if not available_words:
-        # Если все слова использованы, сбрасываем для этого пользователя
-        used_user_words[user_id] = set()
-        conn.close()
-        return None
-
-    # Выбираем случайное слово из доступных
-    chosen_word = random.choice(available_words)[0]
-    # Добавляем его в использованные
-    used_user_words[user_id].add(chosen_word)
-
-    conn.close()
-    return chosen_word
-
-
-# Получает перевод по английскому слову
-def get_rword_by_aword(user_id: int, aword: str) -> Optional[str]:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT rword FROM words 
-        WHERE user_id = ? AND aword = ?
-    ''', (user_id, aword))
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else None
-
-'''-----------------------------------------------------------------------------------------------------------------------------'''
-
-
-
-
-'''CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV'''
-
-# Получает общие слова из CSV по уровню
-def get_common_words(level: str) -> Dict[str, str]:
-    words = {}
-    with open(COMMON_WORDS_CSV, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row['level'] == level:
-                words[row['english']] = row['russian']
-    return words
-
-
-# Глобальный словарь для отслеживания использованных слов по уровням
-used_common_words = {}
-
-def get_random_common_word(level: str) -> Optional[Tuple[str, str]]:
-    # Если для этого уровня еще нет записи, создаем пустой set
-    if level not in used_common_words:
-        used_common_words[level] = set()
-
-    words = []
-    with open(COMMON_WORDS_CSV, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            if row['level'] == level:
-                word_pair = (row['english'], row['russian'])
-                # Добавляем только те слова, которые еще не использовались
-                if word_pair not in used_common_words[level]:
-                    words.append(word_pair)
-
-    if not words:
-        # Если все слова использованы, можно сбросить для этого уровня
-        used_common_words[level] = set()
-        return None
-
-    # Выбираем случайное слово
-    chosen_word = random.choice(words)
-    # Добавляем его в использованные
-    used_common_words[level].add(chosen_word)
-
-    return chosen_word
-
-
-
-#Получить все доступные уровни из CSV файла с общими словами
-def get_available_levels() -> List[str]:
-    levels = set()  # Используем set для автоматического удаления дубликатов
-
-    try:
-        with open(COMMON_WORDS_CSV, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if 'level' in row:  # Проверяем наличие колонки level
-                    levels.add(row['level'])
-    except FileNotFoundError:
-        print(f"Файл {COMMON_WORDS_CSV} не найден. Создаём новый...")
-        init_common_words()  # Пытаемся создать файл, если его нет
-        return get_available_levels()  # Рекурсивно вызываем себя после создания файла
-    except Exception as e:
-        print(f"Ошибка при чтении CSV файла: {e}")
-        return []
-
-    # Сортируем уровни в правильном порядке (A1, A2, B1, B2, C1, C2)
-    sorted_levels = sorted(levels, key=lambda x: (x[0], int(x[1])))
-    return sorted_levels
-
-'''CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV CSV '''
-
-
-
-
-
-class Words(StatesGroup):
-    Translate = State()
-
+# Core state groups and runtime objects
 
 class QuizStates(StatesGroup):
     SELECTING_MODE = State()
     SELECTING_LEVEL = State()
     ANSWERING = State()
+    CONTEXT_ANSWERING = State()
+    REVERSE_SELECTING_MODE = State()
+    REVERSE_SELECTING_LEVEL = State()
+    REVERSE_ANSWERING = State()
+    right_cnt = "right_cnt"
+    wrong_cnt = "wrong_cnt"
+
 
 
 
@@ -242,20 +65,9 @@ class DeleteStates(StatesGroup):
     waiting_for_word = State()
 
 
-running_processes = True
-running_processes = True
-
-
-
-class Words(StatesGroup):
-    Original = State()
-    Translate = State()
-    Cnt = "cnt"
-
-
-
 class Reg(StatesGroup):  #класс нужен для состояния
     Aword = State()
+    SuggestTranslation = State()
     Rword = State()
 
 
@@ -264,49 +76,340 @@ class TimerStates(StatesGroup):
     waiting_interval = State()
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), 'vocabulary_bot.db')
-COMMON_WORDS_CSV = "common_words.csv"
-CSV_PATH = "Users.csv"
-DICT_PATH = "Storage.py"
-
-
-
-
-
-
-
 bot = Bot(token=config.BOT_TOKEN)
-users = {}
+REMINDER_CHECK_SECONDS = 10
+TRANSLATION_CACHE_TTL_SECONDS = 1800
+_translation_variants_cache: dict[tuple[str, str, str], tuple[float, set[str]]] = {}
+CONTEXT_CACHE_TTL_SECONDS = 1800
+_context_sentence_cache: dict[str, tuple[float, str]] = {}
 
 
+def get_translation_choice_keyboard(suggested: str) -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=f"\u2705 \u0418\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c: {suggested}")],
+            [KeyboardButton(text="\u270D\uFE0F \u0412\u0432\u0435\u0441\u0442\u0438 \u043f\u0435\u0440\u0435\u0432\u043e\u0434 \u0432\u0440\u0443\u0447\u043d\u0443\u044e")],
+            [KeyboardButton(text="\u274C \u041E\u0442\u043C\u0435\u043D\u0430")],
+            [KeyboardButton(text=STOP_BUTTON_TEXT)],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True,
+    )
 
-user_timers = {}
-user_attempts = {}
+
+def is_stop_requested(text: str | None) -> bool:
+    return (text or "").strip().lower() in STOP_WORDS
+
+
+def suggest_translation_en_ru(word: str) -> str | None:
+    """Return a suggested RU translation for EN word or None on any failure."""
+    try:
+        response = requests.get(
+            "https://api.mymemory.translated.net/get",
+            params={"q": word, "langpair": "en|ru"},
+            timeout=5,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        suggested = (payload.get("responseData", {}) or {}).get("translatedText", "")
+        suggested = suggested.strip()
+        return suggested or None
+    except Exception:
+        return None
+
+
+def _normalize_answer(text: str) -> str:
+    normalized = (text or "").strip().lower().replace("ё", "е")
+    # Keep only latin/cyrillic letters, digits, spaces and hyphen.
+    normalized = re.sub(r"[^a-zа-я0-9\s-]", " ", normalized)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+def _extract_candidates(text: str) -> set[str]:
+    if not text:
+        return set()
+    chunks = re.split(r"[,;/]|(?:\s+-\s+)|(?:\s+\|\s+)", text)
+    result = {_normalize_answer(chunk) for chunk in chunks if _normalize_answer(chunk)}
+    return result
+
+
+def _fetch_translation_variants(source_word: str, src_lang: str, dst_lang: str) -> set[str]:
+    variants: set[str] = set()
+    response = requests.get(
+        "https://api.mymemory.translated.net/get",
+        params={"q": source_word, "langpair": f"{src_lang}|{dst_lang}"},
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = response.json()
+
+    translated = (payload.get("responseData", {}) or {}).get("translatedText", "")
+    variants.update(_extract_candidates(translated))
+
+    for match in payload.get("matches", []) or []:
+        variants.update(_extract_candidates(match.get("translation", "")))
+
+    return {item for item in variants if item}
+
+
+def _get_cached_variants(source_word: str, src_lang: str, dst_lang: str) -> set[str]:
+    key = (_normalize_answer(source_word), src_lang, dst_lang)
+    now_ts = time.time()
+    cached = _translation_variants_cache.get(key)
+    if cached and (now_ts - cached[0] <= TRANSLATION_CACHE_TTL_SECONDS):
+        return set(cached[1])
+
+    try:
+        variants = _fetch_translation_variants(source_word, src_lang, dst_lang)
+    except Exception:
+        variants = set()
+
+    _translation_variants_cache[key] = (now_ts, variants)
+    return set(variants)
+
+
+def _cleanup_context_sentence(sentence: str, word: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (sentence or "").strip())
+    if not cleaned:
+        return ""
+    if len(cleaned) > 220:
+        return ""
+    # Keep only examples where target word is explicitly present in sentence.
+    word_re = rf"\b{re.escape(word.lower())}(?:'s|s)?\b"
+    if not re.search(word_re, cleaned.lower()):
+        return ""
+    return cleaned
+
+
+def _fetch_context_sentence_from_dictionary(word: str) -> str | None:
+    response = requests.get(
+        f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}",
+        timeout=5,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return None
+
+    candidates: list[str] = []
+    for entry in payload:
+        for meaning in (entry.get("meanings") or []):
+            for definition in (meaning.get("definitions") or []):
+                example = definition.get("example")
+                if isinstance(example, str):
+                    cleaned = _cleanup_context_sentence(example, word)
+                    if cleaned:
+                        candidates.append(cleaned)
+    if not candidates:
+        return None
+    # Prefer shorter examples for easier learning.
+    candidates.sort(key=len)
+    return candidates[0]
+
+
+def _build_context_sentence_fallback(word: str) -> str:
+    templates = [
+        "I use this {word} every day.",
+        "I saw a {word} near my home yesterday.",
+        "This {word} is very important for my work.",
+        "Can you show me your {word}?",
+        "We talked about this {word} in class.",
+    ]
+    return random.choice(templates).format(word=word)
+
+
+def highlight_target_word(sentence: str, word: str) -> str:
+    escaped_sentence = html.escape(sentence or "")
+    escaped_word = html.escape((word or "").strip())
+    if not escaped_word:
+        return escaped_sentence
+
+    pattern = re.compile(rf"(?i)\b({re.escape(escaped_word)}(?:'s|s)?)\b")
+    return pattern.sub(r"<b>\1</b>", escaped_sentence)
+
+
+def get_context_sentence(word: str) -> str:
+    normalized_word = (word or "").strip().lower()
+    if not normalized_word:
+        return ""
+
+    now_ts = time.time()
+    cached = _context_sentence_cache.get(normalized_word)
+    if cached and (now_ts - cached[0] <= CONTEXT_CACHE_TTL_SECONDS):
+        return cached[1]
+
+    sentence = ""
+    try:
+        sentence = _fetch_context_sentence_from_dictionary(normalized_word) or ""
+    except Exception:
+        sentence = ""
+    if not sentence:
+        sentence = _build_context_sentence_fallback(normalized_word)
+
+    _context_sentence_cache[normalized_word] = (now_ts, sentence)
+    return sentence
+
+
+async def get_accepted_answers(
+    source_word: str,
+    base_answer: str,
+    src_lang: str,
+    dst_lang: str,
+) -> set[str]:
+    accepted = set(_extract_candidates(base_answer))
+    api_variants = await asyncio.to_thread(_get_cached_variants, source_word, src_lang, dst_lang)
+    accepted.update(api_variants)
+    return accepted
+
+
+async def send_word_added_message(message: Message, aword: str, rword: str, first_name: str) -> None:
+    await message.answer(
+        f"✅ <b>Слово успешно добавлено!</b>\n\n"
+        f"<b>Английский:</b> <code>{aword}</code>\n"
+        f"<b>Русский:</b> <code>{rword}</code>\n\n"
+        f"🌟 <i>{first_name}, можете ввести следующее английское слово или написать 'стоп' для завершения</i>",
+        parse_mode="HTML",
+    )
+
+
+def ensure_reminders_table():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            user_id INTEGER PRIMARY KEY,
+            interval_minutes INTEGER NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            next_remind_at INTEGER
+        )
+    """)
+
+    cursor.execute("PRAGMA table_info(reminders)")
+    columns = {row[1] for row in cursor.fetchall()}
+    if "next_remind_at" not in columns:
+        cursor.execute("ALTER TABLE reminders ADD COLUMN next_remind_at INTEGER")
+
+    conn.commit()
+    conn.close()
+
+
+async def reminders_worker():
+    ensure_reminders_table()
+    while True:
+        now_ts = int(time.time())
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT user_id, interval_minutes
+            FROM reminders
+            WHERE enabled = 1
+              AND COALESCE(next_remind_at, 0) <= ?
+        """, (now_ts,))
+        due_rows = cursor.fetchall()
+
+        for user_id, interval_minutes in due_rows:
+            try:
+                await bot.send_message(
+                    user_id,
+                    "⏰ Пора повторить слова и улучшить прогресс! Используй /check или /check_reverse."
+                )
+            except Exception:
+                # If user blocked bot or chat is unavailable, keep scheduler alive.
+                pass
+
+            next_ts = int(time.time()) + interval_minutes * 60
+            cursor.execute("""
+                UPDATE reminders
+                SET next_remind_at = ?
+                WHERE user_id = ?
+            """, (next_ts, user_id))
+
+        conn.commit()
+        conn.close()
+        await asyncio.sleep(REMINDER_CHECK_SECONDS)
+
+
+def reminder_main_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🔔 Включить"), KeyboardButton(text="🔕 Выключить")],
+            [KeyboardButton(text="❌ Отмена")],
+            [KeyboardButton(text=STOP_BUTTON_TEXT)],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+
+def reminder_interval_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="15 минут"), KeyboardButton(text="1 час")],
+            [KeyboardButton(text="5 часов"), KeyboardButton(text="🛠 Свое время")],
+            [KeyboardButton(text="❌ Отмена")],
+            [KeyboardButton(text=STOP_BUTTON_TEXT)],
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+
+def reminder_disable(user_id: int):
+    ensure_reminders_table()
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE reminders SET enabled = 0 WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+
+def reminder_enable(user_id: int, minutes: int):
+    ensure_reminders_table()
+    next_ts = int(time.time()) + minutes * 60
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO reminders (user_id, interval_minutes, enabled, next_remind_at)
+        VALUES (?, ?, 1, ?)
+        ON CONFLICT(user_id)
+        DO UPDATE SET interval_minutes = ?, enabled = 1, next_remind_at = ?
+    """, (user_id, minutes, next_ts, minutes, next_ts))
+    conn.commit()
+    conn.close()
 
 
 '''------------------------------------------------------------------------------------------------------------------------------------'''
+
+@router.message(StateFilter("*"), F.text.func(is_stop_requested))
+async def stop_active_flow(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer(
+        "\u23F9 \u0414\u0435\u0439\u0441\u0442\u0432\u0438\u0435 \u043e\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u043e.",
+        reply_markup=ReplyKeyboardRemove(),
+    )
 
 @router.message(Command("start"))
 async def start(message: Message):
     user_id = message.from_user.id
     first_name = message.from_user.first_name  # Получаем имя пользователя
-
     welcome_text = (
         f"👋 <b>Привет, {first_name}!</b>\n\n"
-        "Я - твой помощник в изучении английских слов! 📚\n"
-        "Я буду хранить твой персональный словарь и помогать тебе его запоминать.\n\n"
+        "Я твой помощник в изучении английских слов.\n"
+        "Храню твой словарь и помогаю улучшать прогресс.\n\n"
         "✨ <b>Что я умею:</b>\n"
-        "• Добавлять новые слова и переводы\n"
-        "• Показывать все твои слова\n"
-        "• Проверять твои знания в двух режимах\n"
-        "• Удалять слова, которые ты уже выучил\n\n"
-        "📌 <b>Доступные команды:</b>\n"
-        "/add - Добавить новое слово + перевод\n"
-        "/delete_word - Удалить слово из словаря\n"
-        "/allwords - Показать все слова\n"
-        "/check - Проверка знаний (английский → русский)\n"
-        "/check_reverse - Проверка знаний (русский → английский)\n\n"
-        "Начни с команды /add чтобы добавить первое слово!"
+        "📝 /add - добавить новое слово и перевод\n"
+        "📚 /allwords - показать все твои слова\n"
+        "🗑️ /delete_word - удалить слово из словаря\n"
+        "🧠 /check - тренировка: английский -> русский\n"
+        "🧩 /check_context - перевод слова в контексте предложения\n"
+        "🔁 /check_reverse - тренировка: русский -> английский\n"
+        "📊 /stats - показать статистику и точность\n"
+        "🔥 /hard_words - показать сложные слова\n"
+        "🏆 /achievements - показать твой текущий уровень\n"
+        "⏰ /reminder N - включить таймер напоминаний в минутах (пример: /reminder 3)\n"
+        "🔕 /reminder off - отключить напоминания\n\n"
+        "🚀 Начни с /add, чтобы добавить первое слово."
     )
 
     if not user_exists(user_id):
@@ -363,7 +466,7 @@ async def show_my_words(message: Message):
 
 '''-----------------------------------------------------------------------------------------------------------------------------------------'''
 ENGLISH_PATTERN = re.compile(r'^[a-zA-Z\s\'-]+$')
-RUSSIAN_PATTERN = re.compile(r'^[а-яА-ЯёЁ\s\'-]+$')
+RUSSIAN_PATTERN = re.compile(r"^[\u0400-\u04FF\s'-]+$")
 
 @router.message(Command("add"))
 async def step_one(message: Message, state: FSMContext):
@@ -408,14 +511,71 @@ async def step_two(message: Message, state: FSMContext):
         return  # Не меняем состояние, остаемся в Aword
 
     await state.update_data(aword=user_text)
-    await state.set_state(Reg.Rword)
+    suggested = await asyncio.to_thread(suggest_translation_en_ru, user_text)
+
+    if suggested:
+        await state.update_data(suggested_translation=suggested)
+        await state.set_state(Reg.SuggestTranslation)
+        await message.answer(
+            f"🤖 <b>Предлагаемый перевод для</b> <code>{user_text}</code>:\n"
+            f"<code>{suggested}</code>\n\n"
+            "Выберите действие:",
+            parse_mode="HTML",
+            reply_markup=get_translation_choice_keyboard(suggested),
+        )
+    else:
+        await state.set_state(Reg.Rword)
+        await message.answer(
+            f"🔄 <b>{first_name}, теперь введите русский перевод для слова:</b>\n"
+            f"<code>{user_text}</code>\n\n"
+            "📌 Можно ввести несколько вариантов перевода через запятую\n"
+            "⚠️ <i>Только русские буквы!</i>",
+            parse_mode="HTML",
+            reply_markup=stop_rkb,
+        )
+
+
+@router.message(Reg.SuggestTranslation)
+async def step_three_suggested_translation(message: Message, state: FSMContext):
+    user_text = (message.text or "").strip()
+    user_id = message.from_user.id
+    first_name = message.from_user.first_name
+    data = await state.get_data()
+    aword = data.get("aword", "")
+    suggested = data.get("suggested_translation", "")
+
+    if user_text.lower() in ["стоп", "stop", "❌ отмена", "отмена"]:
+        await message.answer(
+            "⏸ <b>Ввод приостановлен</b>\n\n"
+            "Вы можете продолжить добавление слов командой /add",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await state.clear()
+        return
+
+    if user_text.startswith("✅ Использовать"):
+        add_word(user_id, aword, suggested)
+        await send_word_added_message(message, aword, suggested, first_name)
+        await state.set_state(Reg.Aword)
+        await message.answer("Введите следующее английское слово:", reply_markup=stop_rkb)
+        return
+
+    if "вручную" in user_text.lower():
+        await state.set_state(Reg.Rword)
+        await message.answer(
+            f"🔄 <b>{first_name}, теперь введите русский перевод для слова:</b>\n"
+            f"<code>{aword}</code>\n\n"
+            "📌 Можно ввести несколько вариантов перевода через запятую\n"
+            "⚠️ <i>Только русские буквы!</i>",
+            parse_mode="HTML",
+            reply_markup=stop_rkb,
+        )
+        return
+
     await message.answer(
-        f"🔄 <b>{first_name}, теперь введите русский перевод для слова:</b>\n"
-        f"<code>{user_text}</code>\n\n"
-        "📌 Можно ввести несколько вариантов перевода через запятую\n"
-        "⚠️ <i>Только русские буквы!</i>",
-        parse_mode="HTML",
-        reply_markup = stop_rkb
+        "Пожалуйста, выберите один из вариантов кнопкой ниже.",
+        reply_markup=get_translation_choice_keyboard(suggested),
     )
 
 @router.message(Reg.Rword)
@@ -447,13 +607,7 @@ async def step_four(message: Message, state: FSMContext):
 
     # Добавляем слово в базу данных
     add_word(user_id, aword, user_text)
-    await message.answer(
-        f"✅ <b>Слово успешно добавлено!</b>\n\n"
-        f"<b>Английский:</b> <code>{aword}</code>\n"
-        f"<b>Русский:</b> <code>{user_text}</code>\n\n"
-        f"🌟 <i>{first_name}, можете ввести следующее английское слово или написать 'стоп' для завершения</i>",
-        parse_mode="HTML"
-    )
+    await send_word_added_message(message, aword, user_text, first_name)
     await state.set_state(Reg.Aword)
 
 '''-----------------------------------------------------------------------------------------------------------------------------------'''
@@ -475,7 +629,8 @@ async def delete_word_handler(message: Message, state: FSMContext):
     await message.answer(
         f"🗑 <b>{first_name}, введите слово для удаления:</b>\n\n"
         "• Для отмены напишите <code>стоп</code>",
-        parse_mode="HTML"
+        parse_mode="HTML",
+        reply_markup=stop_rkb,
     )
 
 
@@ -492,7 +647,7 @@ async def process_deletion(message: Message, state: FSMContext):
 
     conn = None
     try:
-        conn = sqlite3.connect('vocabulary_bot.db', timeout=10)
+        conn = sqlite3.connect(DB_PATH, timeout=10)
         conn.execute("PRAGMA journal_mode=WAL")
         cursor = conn.cursor()
 
@@ -547,7 +702,8 @@ async def start_check(msg: Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="🔒 Личные слова")],
                 [KeyboardButton(text="🌍 Общий словарь")],
-                [KeyboardButton(text="❌ Отмена")]
+                [KeyboardButton(text="❌ Отмена")],
+                [KeyboardButton(text=STOP_BUTTON_TEXT)],
             ],
             resize_keyboard=True,
             one_time_keyboard=True
@@ -582,8 +738,11 @@ async def select_mode(msg: Message, state: FSMContext):
         await state.update_data({
             "words": words,
             "mode": "personal",
-            "level": None
+            "level": None ,
+            "right_cnt": 0 ,
+            "wrong_cnt": 0,
         })
+
         await msg.answer(
             "🔐 <b>Режим: Личные слова</b>\n\n"
             "У вас будет 2 попытки для каждого слова",
@@ -606,7 +765,8 @@ async def select_mode(msg: Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="🔒 Личные слова")],
                 [KeyboardButton(text="🌍 Общий словарь")],
-                [KeyboardButton(text="❌ Отмена")]
+                [KeyboardButton(text="❌ Отмена")],
+                [KeyboardButton(text=STOP_BUTTON_TEXT)],
             ],
             resize_keyboard=True
         )
@@ -650,39 +810,20 @@ async def select_level(msg: Message, state: FSMContext):
 async def ask_next_word(msg: Message, state: FSMContext):
     data = await state.get_data()
     words = data["words"]
-    mode = data["mode"]
+    user_id = msg.from_user.id
 
     # Получаем или инициализируем множество использованных слов в состоянии
     used_words = data.get("used_words", set())
 
-    if mode == "personal":
-        # Фильтруем слова, оставляя только неиспользованные
-        available_words = {k: v for k, v in words.items() if k not in used_words}
+    # Для SRS берем только слова, еще не использованные в текущем цикле.
+    available_words = {k: v for k, v in words.items() if k not in used_words}
+    if not available_words:
+        used_words = set()
+        available_words = words.copy()
 
-        if not available_words:
-            # Все слова использованы - сбрасываем и начинаем заново
-            used_words = set()
-            available_words = words.copy()
-
-        aword = random.choice(list(available_words.keys()))
-        rword = available_words[aword]
-    else:  # common
-        level = data["level"]
-
-        # Получаем слово, исключая использованные
-        word_pair = get_random_common_word(level)
-        while word_pair and word_pair[0] in used_words:
-            word_pair = get_random_common_word(level)
-
-        if not word_pair:
-            # Все слова использованы или их нет
-            used_words = set()
-            word_pair = get_random_common_word(level)
-            if not word_pair:
-                await msg.answer("⚠️ Не удалось получить слово. Попробуйте еще раз.")
-                return
-
-        aword, rword = word_pair
+    candidates = list(available_words.keys())
+    aword = pick_srs_word(user_id, candidates) or random.choice(candidates)
+    rword = available_words[aword]
 
     # Добавляем слово в использованные
     used_words.add(aword)
@@ -715,15 +856,45 @@ async def check_answer(msg: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
 
-    correct = data['correct_answer']
-    user_answer = msg.text.lower()
+    correct = data["correct_answer"]
+    user_answer_normalized = _normalize_answer(msg.text or "")
+    accepted_answers = await get_accepted_answers(
+        source_word=data["current_word"],
+        base_answer=correct,
+        src_lang="en",
+        dst_lang="ru",
+    )
 
-    if user_answer == correct.lower():
+    if user_answer_normalized in accepted_answers:
+        stats_event = update_word_stats(
+            msg.from_user.id,
+            data["current_word"],
+            True
+        )
+
+        right_cnt = data.get("right_cnt", 0) + 1
+        await state.update_data({"right_cnt": right_cnt})
         await msg.reply("✅ <b>Верно!</b>", parse_mode="HTML")
+        if stats_event.get("hard_removed"):
+            await msg.answer(
+                f"🎉 Слово <code>{data['current_word']}</code> больше не считается сложным.\n"
+                "Если снова будут ошибки, оно может вернуться в список сложных.",
+                parse_mode="HTML"
+            )
         return await ask_next_word(msg, state)
+
+
 
     attempts = data['attempts'] + 1
     if attempts >= 2:
+        update_word_stats(
+            msg.from_user.id,
+            data["current_word"],
+            False
+        )
+        wrong_cnt = data.get("wrong_cnt", 0) + 1
+        await state.update_data({"wrong_cnt": wrong_cnt})
+
         await msg.reply(
             f"❌ <b>Правильный ответ:</b>\n<code>{correct}</code>",
             parse_mode="HTML"
@@ -740,16 +911,131 @@ async def check_answer(msg: Message, state: FSMContext):
 
 '''-------------------------------------------------------------------------------------------------------------------------------------------'''
 
-class QuizStates(StatesGroup):
-    # Состояния для обычной проверки (англ -> рус)
-    SELECTING_MODE = State()
-    SELECTING_LEVEL = State()
-    ANSWERING = State()
+@router.message(Command("check_context"))
+async def start_check_context(msg: Message, state: FSMContext):
+    words = get_user_words(msg.from_user.id)
+    if not words:
+        await state.clear()
+        return await msg.answer(
+            "📭 <b>Ваш словарь пуст</b>\n\n"
+            "Добавьте слова через команду /add",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
 
-    # Состояния для обратной проверки (рус -> англ)
-    REVERSE_SELECTING_MODE = State()
-    REVERSE_SELECTING_LEVEL = State()
-    REVERSE_ANSWERING = State()
+    await state.set_state(QuizStates.CONTEXT_ANSWERING)
+    await state.update_data({
+        "words": words,
+        "used_context_words": set(),
+        "right_cnt": 0,
+        "wrong_cnt": 0,
+    })
+    await msg.answer(
+        "🧩 <b>Режим: перевод в контексте</b>\n\n"
+        "Я дам предложение на английском, а вы переведете выделенное слово.\n"
+        "Для выхода нажмите кнопку <b>Стоп</b>.",
+        parse_mode="HTML",
+        reply_markup=stop_rkb,
+    )
+    await ask_next_context_word(msg, state)
+
+
+async def ask_next_context_word(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    words = data.get("words", {})
+    used_words = data.get("used_context_words", set())
+    user_id = msg.from_user.id
+
+    available_words = {k: v for k, v in words.items() if k not in used_words}
+    if not available_words:
+        used_words = set()
+        available_words = words.copy()
+
+    candidates = list(available_words.keys())
+    aword = pick_srs_word(user_id, candidates) or random.choice(candidates)
+    rword = available_words[aword]
+    used_words.add(aword)
+    sentence = await asyncio.to_thread(get_context_sentence, aword)
+    highlighted_sentence = highlight_target_word(sentence, aword)
+
+    await state.update_data({
+        "correct_answer": rword,
+        "current_word": aword,
+        "current_context_sentence": sentence,
+        "attempts": 0,
+        "used_context_words": used_words,
+    })
+
+    await msg.answer(
+        "📝 <b>Контекст:</b>\n"
+        f"<i>{highlighted_sentence}</i>\n\n"
+        f"Переведите слово: <code>{aword}</code>",
+        parse_mode="HTML",
+        reply_markup=stop_rkb,
+    )
+
+
+@router.message(QuizStates.CONTEXT_ANSWERING)
+async def check_context_answer(msg: Message, state: FSMContext):
+    data = await state.get_data()
+    if msg.text.lower() in ["стоп", "stop", "отмена", "❌"]:
+        await state.clear()
+        return await msg.answer(
+            "🏁 <b>Тренировка в контексте завершена</b>",
+            parse_mode="HTML",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+
+    correct = data["correct_answer"]
+    user_answer_normalized = _normalize_answer(msg.text or "")
+    accepted_answers = await get_accepted_answers(
+        source_word=data["current_word"],
+        base_answer=correct,
+        src_lang="en",
+        dst_lang="ru",
+    )
+
+    if user_answer_normalized in accepted_answers:
+        stats_event = update_word_stats(
+            msg.from_user.id,
+            data["current_word"],
+            True,
+        )
+        right_cnt = data.get("right_cnt", 0) + 1
+        await state.update_data({"right_cnt": right_cnt})
+        await msg.reply("✅ <b>Верно!</b>", parse_mode="HTML")
+        if stats_event.get("hard_removed"):
+            await msg.answer(
+                f"🎉 Слово <code>{data['current_word']}</code> больше не считается сложным.\n"
+                "Если снова будут ошибки, оно может вернуться в список сложных.",
+                parse_mode="HTML",
+            )
+        return await ask_next_context_word(msg, state)
+
+    attempts = data["attempts"] + 1
+    if attempts >= 2:
+        update_word_stats(
+            msg.from_user.id,
+            data["current_word"],
+            False,
+        )
+        wrong_cnt = data.get("wrong_cnt", 0) + 1
+        await state.update_data({"wrong_cnt": wrong_cnt})
+        await msg.reply(
+            f"❌ <b>Правильный ответ:</b>\n<code>{correct}</code>",
+            parse_mode="HTML",
+        )
+        return await ask_next_context_word(msg, state)
+
+    await state.update_data({"attempts": attempts})
+    await msg.reply(
+        "🔄 <b>Попробуйте еще раз</b>",
+        parse_mode="HTML",
+        reply_markup=stop_rkb,
+    )
+
+
+'''-------------------------------------------------------------------------------------------------------------------------------------------'''
 
 # Обработчик команды /check_reverse
 @router.message(Command("check_reverse"))
@@ -763,7 +1049,8 @@ async def start_check_reverse(msg: Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="🔒 Личные слова")],
                 [KeyboardButton(text="🌍 Общий словарь")],
-                [KeyboardButton(text="❌ Отмена")]
+                [KeyboardButton(text="❌ Отмена")],
+                [KeyboardButton(text=STOP_BUTTON_TEXT)],
             ],
             resize_keyboard=True,
             one_time_keyboard=True
@@ -821,7 +1108,8 @@ async def handle_reverse_mode(msg: Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="🔒 Личные слова")],
                 [KeyboardButton(text="🌍 Общий словарь")],
-                [KeyboardButton(text="❌ Отмена")]
+                [KeyboardButton(text="❌ Отмена")],
+                [KeyboardButton(text=STOP_BUTTON_TEXT)],
             ],
             resize_keyboard=True
         )
@@ -865,48 +1153,25 @@ async def handle_reverse_level(msg: Message, state: FSMContext):
 async def ask_next_reverse_question(msg: Message, state: FSMContext):
     data = await state.get_data()
     words = data["words"]
-    mode = data["mode"]
+    user_id = msg.from_user.id
 
-    # Получаем список уже использованных слов
+    # Храним использованные английские слова, чтобы корректно работать и
+    # с личным, и с общим словарем (в русском возможны дубликаты).
     used_words = data.get("used_reverse_words", set())
-
-    if mode == "personal":
-        # Фильтруем неиспользованные слова
-        available_words = {k: v for k, v in words.items() if v not in used_words}
-
+    available_words = {k: v for k, v in words.items() if k not in used_words}
+    if not available_words:
+        used_words = set()
+        available_words = words.copy()
         if not available_words:
-            # Если все слова использованы, очищаем историю
-            used_words = set()
-            available_words = words.copy()
-            if not available_words:
-                await msg.answer("⚠️ Нет доступных слов для перевода.")
-                return
+            await msg.answer("⚠️ Нет доступных слов для перевода.")
+            return
 
-        aword = random.choice(list(available_words.keys()))
-        rword = words[aword]
-    else:
-        level = data["level"]
-        word_pair = get_random_common_word(level)
-
-        # Пропускаем уже использованные слова
-        while word_pair and word_pair[1] in used_words:
-            word_pair = get_random_common_word(level)
-
-        if not word_pair:
-            # Если слова закончились, сбрасываем историю
-            used_words = set()
-            word_pair = get_random_common_word(level)
-            if not word_pair:
-                await msg.answer(
-                    "⚠️ Не удалось получить слово. Попробуйте еще раз.",
-                    parse_mode="HTML"
-                )
-                return
-
-        aword, rword = word_pair
+    candidates = list(available_words.keys())
+    aword = pick_srs_word(user_id, candidates) or random.choice(candidates)
+    rword = available_words[aword]
 
     # Добавляем слово в использованные
-    used_words.add(rword)
+    used_words.add(aword)
 
     await state.update_data({
         "correct_answer": aword,
@@ -934,15 +1199,37 @@ async def check_reverse_answer(msg: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
 
-    correct = data['correct_answer'].lower()
-    user_answer = msg.text.lower()
+    correct = data["correct_answer"]
+    user_answer_normalized = _normalize_answer(msg.text or "")
+    accepted_answers = await get_accepted_answers(
+        source_word=data["current_rword"],
+        base_answer=correct,
+        src_lang="ru",
+        dst_lang="en",
+    )
 
-    if user_answer == correct:
+    if user_answer_normalized in accepted_answers:
+        stats_event = update_word_stats(
+            msg.from_user.id,
+            data["correct_answer"],
+            True
+        )
         await msg.reply("✅ <b>Верно!</b>", parse_mode="HTML")
+        if stats_event.get("hard_removed"):
+            await msg.answer(
+                f"🎉 Слово <code>{data['correct_answer']}</code> больше не считается сложным.\n"
+                "Если снова будут ошибки, оно может вернуться в список сложных.",
+                parse_mode="HTML"
+            )
         return await ask_next_reverse_question(msg, state)
 
     attempts = data['attempts'] + 1
     if attempts >= 2:
+        update_word_stats(
+            msg.from_user.id,
+            data["correct_answer"],
+            False
+        )
         await msg.reply(
             f"❌ <b>Правильный ответ:</b>\n<code>{data['correct_answer']}</code>",
             parse_mode="HTML"
@@ -952,24 +1239,214 @@ async def check_reverse_answer(msg: Message, state: FSMContext):
     await state.update_data({"attempts": attempts})
     await msg.reply("🔄 <b>Попробуйте еще раз</b>", parse_mode="HTML", reply_markup=stop_rkb)
 
-'''-------------------------------------------------------------------------------------------------------------------------------------'''
+'''----------------------------------------------------------------------------------------------------------------------------'''
+
+
+@router.message(Command("stats"))
+async def cmd_stats(msg: Message):
+    user_id = msg.from_user.id
+    init_user_stats(user_id)
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT total_correct, total_wrong, learned_words
+        FROM user_stats WHERE user_id = ?
+    """, (user_id,))
+    correct, wrong, learned = cursor.fetchone()
+    conn.close()
+
+    percent = round((correct / max(correct + wrong, 1)) * 100, 1)
+
+    await msg.answer(
+        f"📊 <b>Статистика</b>\n\n"
+        f"📚 Выучено слов: {learned}\n"
+        f"✅ Правильных: {correct}\n"
+        f"❌ Ошибок: {wrong}\n"
+        f"🎯 Точность: {percent}%",
+        parse_mode="HTML"
+    )
+
+
+
+'''-------------------------------------------------------------------------------------------------------------------------------------------'''
+
+@router.message(Command("hard_words"))
+async def cmd_hard_words(msg: Message):
+    words = get_hard_words(msg.from_user.id)
+
+    if not words:
+        return await msg.answer("🎉 У вас нет сложных слов!")
+
+    await msg.answer(
+        "🔥 <b>Сложные слова:</b>\n\n"
+        + "\n".join(words)
+        + "\n\nℹ️ Слово убирается из этого списка после 10 правильных ответов на него.\n"
+        + "Если снова будут ошибки, слово может вернуться в сложные.",
+        parse_mode="HTML"
+    )
 
 
 
 
 
 
-@router.message()
-async def noCommands_handler(msg: Message):
-    await msg.reply("Такой команды нет\n"
-                    "Нажмте <b> Меню </b>, чтобы выбрать команду", parse_mode="HTML")
+'''-------------------------------------------------------------------------------------------------------------------------------------------'''
+
+
+@router.message(Command("achievements"))
+async def cmd_achievements(msg: Message):
+    level = get_user_level(msg.from_user.id)
+
+    titles = {
+        1: "🌱 Новичок",
+        2: "🥉 Ученик",
+        3: "🥈 Продвинутый",
+        4: "🥇 Эксперт",
+        5: "🏆 Мастер"
+    }
+
+    await msg.answer(
+        f"🏅 <b>Ваш уровень:</b> {titles[level]}\n\n"
+        "Нажмите кнопку ниже, чтобы посмотреть как перейти на следующий уровень.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="📈 Как повысить уровень")]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+    )
+
+
+@router.message(F.text == "📈 Как повысить уровень")
+async def achievements_levels_info(msg: Message):
+    await msg.answer(
+        "📚 <b>Описание уровней:</b>\n\n"
+        "🌱 Новичок: 0–99 выученных слов\n"
+        "🥉 Ученик: 100–199 выученных слов\n"
+        "🥈 Продвинутый: 200–499 выученных слов\n"
+        "🥇 Эксперт: 500–999 выученных слов\n"
+        "🏆 Мастер: 1000+ выученных слов\n\n"
+        "Чтобы перейти на следующий уровень, увеличивайте число выученных слов "
+        "(слово считается выученным после 10 правильных ответов).",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 
 
+'''-------------------------------------------------------------------------------------------------------------------------------------------'''
 
 
 
+@router.message(Command("reminder"))
+async def cmd_reminder(msg: Message, state: FSMContext):
+    ensure_reminders_table()
+    args = msg.text.split()
+
+    # Backward compatibility: /reminder 3, /reminder off
+    if len(args) > 1:
+        raw_value = args[1].strip().lower()
+        if raw_value == "off":
+            reminder_disable(msg.from_user.id)
+            await state.clear()
+            return await msg.answer("🔕 Напоминания отключены", reply_markup=ReplyKeyboardRemove())
+
+        try:
+            minutes = int(raw_value)
+        except ValueError:
+            return await msg.answer("Нужно указать число минут. Пример: /reminder 3")
+
+        if minutes <= 0:
+            return await msg.answer("нтервал должен быть больше 0 минут.")
+
+        reminder_enable(msg.from_user.id, minutes)
+        await state.clear()
+        return await msg.answer(
+            f"⏰ Таймер установлен: каждые {minutes} мин.\n"
+            f"Первое напоминание придет через {minutes} мин.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+
+    await state.set_state(TimerStates.SETTING_INTERVAL)
+    await msg.answer(
+        "⏰ Настройка напоминаний.\nВыберите действие:",
+        reply_markup=reminder_main_keyboard()
+    )
+
+
+@router.message(TimerStates.SETTING_INTERVAL)
+async def reminder_choose_action(msg: Message, state: FSMContext):
+    text = (msg.text or "").strip().lower()
+
+    if text.startswith("❌") or text in {"отмена", "cancel"}:
+        await state.clear()
+        return await msg.answer("Настройка напоминаний отменена.", reply_markup=ReplyKeyboardRemove())
+
+    if text.startswith("🔕") or "выключ" in text:
+        reminder_disable(msg.from_user.id)
+        await state.clear()
+        return await msg.answer("🔕 Напоминания отключены", reply_markup=ReplyKeyboardRemove())
+
+    if text.startswith("🔔") or "включ" in text:
+        await state.set_state(TimerStates.waiting_interval)
+        await state.update_data(reminder_custom=False)
+        return await msg.answer(
+            "Выберите интервал напоминаний:",
+            reply_markup=reminder_interval_keyboard()
+        )
+
+    await msg.answer("Выберите кнопку: включить, выключить или отмена.", reply_markup=reminder_main_keyboard())
+
+
+@router.message(TimerStates.waiting_interval)
+async def reminder_set_interval(msg: Message, state: FSMContext):
+    text_raw = (msg.text or "").strip()
+    text = text_raw.lower()
+    data = await state.get_data()
+    custom_mode = data.get("reminder_custom", False)
+
+    if text.startswith("❌") or text in {"отмена", "cancel"}:
+        await state.clear()
+        return await msg.answer("Настройка напоминаний отменена.", reply_markup=ReplyKeyboardRemove())
+
+    if text == "15 минут":
+        minutes = 15
+    elif text == "1 час":
+        minutes = 60
+    elif text == "5 часов":
+        minutes = 300
+    elif text.startswith("🛠") or "свое время" in text:
+        await state.update_data(reminder_custom=True)
+        return await msg.answer(
+            "Введите интервал в минутах (например: 45).",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[
+                    [KeyboardButton(text="❌ Отмена")],
+                    [KeyboardButton(text=STOP_BUTTON_TEXT)],
+                ],
+                resize_keyboard=True,
+                one_time_keyboard=True
+            )
+        )
+    elif custom_mode:
+        if not text.isdigit():
+            return await msg.answer("Введите целое число минут, например: 45")
+        minutes = int(text)
+    else:
+        return await msg.answer("Выберите кнопку с интервалом или 'Свое время'.", reply_markup=reminder_interval_keyboard())
+
+    if minutes <= 0:
+        return await msg.answer("нтервал должен быть больше 0 минут.")
+
+    reminder_enable(msg.from_user.id, minutes)
+    await state.clear()
+    await msg.answer(
+        f"⏰ Таймер установлен: каждые {minutes} мин.\n"
+        f"Первое напоминание придет через {minutes} мин.",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 
 
-##################
+'''-------------------------------------------------------------------------------------------------------------------------------------------'''
