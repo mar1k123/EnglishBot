@@ -1,34 +1,40 @@
 ﻿import asyncio
-import html
-import random
-import re
-import sqlite3
-import time
-import requests
 
-from aiogram import Bot, F, Router
+from aiogram import F
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import (
-    CallbackQuery,
-    KeyboardButton,
-    Message,
-    ReplyKeyboardMarkup,
-    ReplyKeyboardRemove,
-)
+from aiogram.types import CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyKeyboardRemove
 
-import config
+from bot_instance import bot, router
 from database import (
     get_hard_words,
-    pick_srs_word,
     get_user_level,
     init_user_stats,
+    pick_srs_word,
     update_word_stats,
 )
-from keyboards import get_levels_keyboard, stop_rkb
+from keyboards import (
+    get_levels_keyboard,
+    get_translation_choice_keyboard,
+    reminder_interval_keyboard,
+    reminder_main_keyboard,
+    stop_rkb,
+)
 from services.common_words import get_common_words
-from services.paths import DB_PATH
+from services.context_service import get_context_sentence, highlight_target_word
+from services.reminder_service import (
+    ensure_reminders_table,
+    reminder_disable,
+    reminder_enable,
+)
+from services.translation_service import (
+    ENGLISH_PATTERN,
+    RUSSIAN_PATTERN,
+    STOP_BUTTON_TEXT,
+    get_accepted_answers,
+    is_stop_requested,
+    suggest_translation_en_ru,
+)
 from services.user_words import (
     add_user,
     add_word,
@@ -37,347 +43,7 @@ from services.user_words import (
     get_user_words,
     user_exists,
 )
-
-
-router = Router()
-STOP_BUTTON_TEXT = "\u0421\u0442\u043e\u043f"
-STOP_WORDS = {"stop", "\u0441\u0442\u043e\u043f"}
-
-
-'''--------------------------------------------------------------------------------------------------------------------------------------'''
-# Core state groups and runtime objects
-
-class QuizStates(StatesGroup):
-    SELECTING_MODE = State()
-    SELECTING_LEVEL = State()
-    ANSWERING = State()
-    CONTEXT_ANSWERING = State()
-    REVERSE_SELECTING_MODE = State()
-    REVERSE_SELECTING_LEVEL = State()
-    REVERSE_ANSWERING = State()
-    right_cnt = "right_cnt"
-    wrong_cnt = "wrong_cnt"
-
-
-
-
-class DeleteStates(StatesGroup):
-    waiting_for_word = State()
-
-
-class Reg(StatesGroup):  #класс нужен для состояния
-    Aword = State()
-    SuggestTranslation = State()
-    Rword = State()
-
-
-class TimerStates(StatesGroup):
-    SETTING_INTERVAL = State()
-    waiting_interval = State()
-
-
-bot = Bot(token=config.BOT_TOKEN)
-REMINDER_CHECK_SECONDS = 10
-TRANSLATION_CACHE_TTL_SECONDS = 1800
-_translation_variants_cache: dict[tuple[str, str, str], tuple[float, set[str]]] = {}
-CONTEXT_CACHE_TTL_SECONDS = 1800
-_context_sentence_cache: dict[str, tuple[float, str]] = {}
-
-
-def get_translation_choice_keyboard(suggested: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=f"\u2705 \u0418\u0441\u043f\u043e\u043b\u044c\u0437\u043e\u0432\u0430\u0442\u044c: {suggested}")],
-            [KeyboardButton(text="\u270D\uFE0F \u0412\u0432\u0435\u0441\u0442\u0438 \u043f\u0435\u0440\u0435\u0432\u043e\u0434 \u0432\u0440\u0443\u0447\u043d\u0443\u044e")],
-            [KeyboardButton(text="\u274C \u041E\u0442\u043C\u0435\u043D\u0430")],
-            [KeyboardButton(text=STOP_BUTTON_TEXT)],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True,
-    )
-
-
-def is_stop_requested(text: str | None) -> bool:
-    return (text or "").strip().lower() in STOP_WORDS
-
-
-def suggest_translation_en_ru(word: str) -> str | None:
-    """Return a suggested RU translation for EN word or None on any failure."""
-    try:
-        response = requests.get(
-            "https://api.mymemory.translated.net/get",
-            params={"q": word, "langpair": "en|ru"},
-            timeout=5,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        suggested = (payload.get("responseData", {}) or {}).get("translatedText", "")
-        suggested = suggested.strip()
-        return suggested or None
-    except Exception:
-        return None
-
-
-def _normalize_answer(text: str) -> str:
-    normalized = (text or "").strip().lower().replace("ё", "е")
-    # Keep only latin/cyrillic letters, digits, spaces and hyphen.
-    normalized = re.sub(r"[^a-zа-я0-9\s-]", " ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
-    return normalized
-
-
-def _extract_candidates(text: str) -> set[str]:
-    if not text:
-        return set()
-    chunks = re.split(r"[,;/]|(?:\s+-\s+)|(?:\s+\|\s+)", text)
-    result = {_normalize_answer(chunk) for chunk in chunks if _normalize_answer(chunk)}
-    return result
-
-
-def _fetch_translation_variants(source_word: str, src_lang: str, dst_lang: str) -> set[str]:
-    variants: set[str] = set()
-    response = requests.get(
-        "https://api.mymemory.translated.net/get",
-        params={"q": source_word, "langpair": f"{src_lang}|{dst_lang}"},
-        timeout=5,
-    )
-    response.raise_for_status()
-    payload = response.json()
-
-    translated = (payload.get("responseData", {}) or {}).get("translatedText", "")
-    variants.update(_extract_candidates(translated))
-
-    for match in payload.get("matches", []) or []:
-        variants.update(_extract_candidates(match.get("translation", "")))
-
-    return {item for item in variants if item}
-
-
-def _get_cached_variants(source_word: str, src_lang: str, dst_lang: str) -> set[str]:
-    key = (_normalize_answer(source_word), src_lang, dst_lang)
-    now_ts = time.time()
-    cached = _translation_variants_cache.get(key)
-    if cached and (now_ts - cached[0] <= TRANSLATION_CACHE_TTL_SECONDS):
-        return set(cached[1])
-
-    try:
-        variants = _fetch_translation_variants(source_word, src_lang, dst_lang)
-    except Exception:
-        variants = set()
-
-    _translation_variants_cache[key] = (now_ts, variants)
-    return set(variants)
-
-
-def _cleanup_context_sentence(sentence: str, word: str) -> str:
-    cleaned = re.sub(r"\s+", " ", (sentence or "").strip())
-    if not cleaned:
-        return ""
-    if len(cleaned) > 220:
-        return ""
-    # Keep only examples where target word is explicitly present in sentence.
-    word_re = rf"\b{re.escape(word.lower())}(?:'s|s)?\b"
-    if not re.search(word_re, cleaned.lower()):
-        return ""
-    return cleaned
-
-
-def _fetch_context_sentence_from_dictionary(word: str) -> str | None:
-    response = requests.get(
-        f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}",
-        timeout=5,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    if not isinstance(payload, list):
-        return None
-
-    candidates: list[str] = []
-    for entry in payload:
-        for meaning in (entry.get("meanings") or []):
-            for definition in (meaning.get("definitions") or []):
-                example = definition.get("example")
-                if isinstance(example, str):
-                    cleaned = _cleanup_context_sentence(example, word)
-                    if cleaned:
-                        candidates.append(cleaned)
-    if not candidates:
-        return None
-    # Prefer shorter examples for easier learning.
-    candidates.sort(key=len)
-    return candidates[0]
-
-
-def _build_context_sentence_fallback(word: str) -> str:
-    templates = [
-        "I use this {word} every day.",
-        "I saw a {word} near my home yesterday.",
-        "This {word} is very important for my work.",
-        "Can you show me your {word}?",
-        "We talked about this {word} in class.",
-    ]
-    return random.choice(templates).format(word=word)
-
-
-def highlight_target_word(sentence: str, word: str) -> str:
-    escaped_sentence = html.escape(sentence or "")
-    escaped_word = html.escape((word or "").strip())
-    if not escaped_word:
-        return escaped_sentence
-
-    pattern = re.compile(rf"(?i)\b({re.escape(escaped_word)}(?:'s|s)?)\b")
-    return pattern.sub(r"<b>\1</b>", escaped_sentence)
-
-
-def get_context_sentence(word: str) -> str:
-    normalized_word = (word or "").strip().lower()
-    if not normalized_word:
-        return ""
-
-    now_ts = time.time()
-    cached = _context_sentence_cache.get(normalized_word)
-    if cached and (now_ts - cached[0] <= CONTEXT_CACHE_TTL_SECONDS):
-        return cached[1]
-
-    sentence = ""
-    try:
-        sentence = _fetch_context_sentence_from_dictionary(normalized_word) or ""
-    except Exception:
-        sentence = ""
-    if not sentence:
-        sentence = _build_context_sentence_fallback(normalized_word)
-
-    _context_sentence_cache[normalized_word] = (now_ts, sentence)
-    return sentence
-
-
-async def get_accepted_answers(
-    source_word: str,
-    base_answer: str,
-    src_lang: str,
-    dst_lang: str,
-) -> set[str]:
-    accepted = set(_extract_candidates(base_answer))
-    api_variants = await asyncio.to_thread(_get_cached_variants, source_word, src_lang, dst_lang)
-    accepted.update(api_variants)
-    return accepted
-
-
-async def send_word_added_message(message: Message, aword: str, rword: str, first_name: str) -> None:
-    await message.answer(
-        f"✅ <b>Слово успешно добавлено!</b>\n\n"
-        f"<b>Английский:</b> <code>{aword}</code>\n"
-        f"<b>Русский:</b> <code>{rword}</code>\n\n"
-        f"🌟 <i>{first_name}, можете ввести следующее английское слово или написать 'стоп' для завершения</i>",
-        parse_mode="HTML",
-    )
-
-
-def ensure_reminders_table():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS reminders (
-            user_id INTEGER PRIMARY KEY,
-            interval_minutes INTEGER NOT NULL,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            next_remind_at INTEGER
-        )
-    """)
-
-    cursor.execute("PRAGMA table_info(reminders)")
-    columns = {row[1] for row in cursor.fetchall()}
-    if "next_remind_at" not in columns:
-        cursor.execute("ALTER TABLE reminders ADD COLUMN next_remind_at INTEGER")
-
-    conn.commit()
-    conn.close()
-
-
-async def reminders_worker():
-    ensure_reminders_table()
-    while True:
-        now_ts = int(time.time())
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT user_id, interval_minutes
-            FROM reminders
-            WHERE enabled = 1
-              AND COALESCE(next_remind_at, 0) <= ?
-        """, (now_ts,))
-        due_rows = cursor.fetchall()
-
-        for user_id, interval_minutes in due_rows:
-            try:
-                await bot.send_message(
-                    user_id,
-                    "⏰ Пора повторить слова и улучшить прогресс! Используй /check или /check_reverse."
-                )
-            except Exception:
-                # If user blocked bot or chat is unavailable, keep scheduler alive.
-                pass
-
-            next_ts = int(time.time()) + interval_minutes * 60
-            cursor.execute("""
-                UPDATE reminders
-                SET next_remind_at = ?
-                WHERE user_id = ?
-            """, (next_ts, user_id))
-
-        conn.commit()
-        conn.close()
-        await asyncio.sleep(REMINDER_CHECK_SECONDS)
-
-
-def reminder_main_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🔔 Включить"), KeyboardButton(text="🔕 Выключить")],
-            [KeyboardButton(text="❌ Отмена")],
-            [KeyboardButton(text=STOP_BUTTON_TEXT)],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-
-def reminder_interval_keyboard() -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="15 минут"), KeyboardButton(text="1 час")],
-            [KeyboardButton(text="5 часов"), KeyboardButton(text="🛠 Свое время")],
-            [KeyboardButton(text="❌ Отмена")],
-            [KeyboardButton(text=STOP_BUTTON_TEXT)],
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-
-def reminder_disable(user_id: int):
-    ensure_reminders_table()
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE reminders SET enabled = 0 WHERE user_id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-
-
-def reminder_enable(user_id: int, minutes: int):
-    ensure_reminders_table()
-    next_ts = int(time.time()) + minutes * 60
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO reminders (user_id, interval_minutes, enabled, next_remind_at)
-        VALUES (?, ?, 1, ?)
-        ON CONFLICT(user_id)
-        DO UPDATE SET interval_minutes = ?, enabled = 1, next_remind_at = ?
-    """, (user_id, minutes, next_ts, minutes, next_ts))
-    conn.commit()
-    conn.close()
-
+from states.bot_states import DeleteStates, QuizStates, Reg, TimerStates
 
 '''------------------------------------------------------------------------------------------------------------------------------------'''
 
