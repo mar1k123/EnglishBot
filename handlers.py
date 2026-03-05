@@ -1,4 +1,7 @@
 ﻿import asyncio
+import random
+import re
+import sqlite3
 
 from aiogram import F
 from aiogram.filters import Command, StateFilter
@@ -7,6 +10,7 @@ from aiogram.types import CallbackQuery, KeyboardButton, Message, ReplyKeyboardM
 
 from bot_instance import bot, router
 from database import (
+    DB_PATH,
     get_hard_words,
     get_user_level,
     init_user_stats,
@@ -31,6 +35,7 @@ from services.translation_service import (
     ENGLISH_PATTERN,
     RUSSIAN_PATTERN,
     STOP_BUTTON_TEXT,
+    _normalize_answer,
     get_accepted_answers,
     is_stop_requested,
     suggest_translation_en_ru,
@@ -46,6 +51,13 @@ from services.user_words import (
 from states.bot_states import DeleteStates, QuizStates, Reg, TimerStates
 
 '''------------------------------------------------------------------------------------------------------------------------------------'''
+
+async def send_word_added_message(message: Message, aword: str, rword: str, first_name: str):
+    await message.answer(
+        f"✅ <b>{first_name}, слово успешно добавлено!</b>\n\n"
+        f"<code>{aword}</code> - <code>{rword}</code>",
+        parse_mode="HTML",
+    )
 
 @router.message(StateFilter("*"), F.text.func(is_stop_requested))
 async def stop_active_flow(message: Message, state: FSMContext):
@@ -275,6 +287,7 @@ async def step_four(message: Message, state: FSMContext):
     add_word(user_id, aword, user_text)
     await send_word_added_message(message, aword, user_text, first_name)
     await state.set_state(Reg.Aword)
+    await message.answer("Введите следующее английское слово:", reply_markup=stop_rkb)
 
 '''-----------------------------------------------------------------------------------------------------------------------------------'''
 
